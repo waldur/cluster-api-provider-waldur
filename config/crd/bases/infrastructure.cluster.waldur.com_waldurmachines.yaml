@@ -39,9 +39,8 @@ spec:
           spec:
             description: spec defines the desired state of WaldurMachine
             properties:
-              foo:
-                description: foo is an example field of WaldurMachine. Edit waldurmachine_types.go
-                  to remove/update
+              state:
+                description: State
                 type: string
             type: object
           status:

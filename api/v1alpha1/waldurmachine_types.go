@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	waldurclient "github.com/waldur/go-client"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -29,10 +30,9 @@ type WaldurMachineSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 	// The following markers will use OpenAPI v3 schema to validate the value
 	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
-
-	// foo is an example field of WaldurMachine. Edit waldurmachine_types.go to remove/update
-	// +optional
-	Foo *string `json:"foo,omitempty"`
+	
+	// State
+	State *waldurclient.CoreStates `json:"state,omitempty"`
 }
 
 // WaldurMachineStatus defines the observed state of WaldurMachine.
