@@ -33,6 +33,15 @@ type WaldurClusterSpec struct {
 	// foo is an example field of WaldurCluster. Edit waldurcluster_types.go to remove/update
 	// +optional
 	Foo *string `json:"foo,omitempty"`
+	
+	// Organization slug for project creation
+	Organization *string `json:"org,omitempty"`
+	
+	// Slug of project containing tenants
+	Project *string `json:"project,omitempty"`
+	
+	// List of slugs for tenant offerings
+	Offerings *[]string `json:"offering,omitempty"`
 }
 
 // WaldurClusterStatus defines the observed state of WaldurCluster.

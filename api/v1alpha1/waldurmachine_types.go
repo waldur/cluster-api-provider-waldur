@@ -31,7 +31,7 @@ type WaldurMachineSpec struct {
 	// The following markers will use OpenAPI v3 schema to validate the value
 	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
 	
-	// State
+	// Target VM state
 	State *waldurclient.CoreStates `json:"state,omitempty"`
 }
 

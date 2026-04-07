@@ -43,6 +43,17 @@ spec:
                 description: foo is an example field of WaldurCluster. Edit waldurcluster_types.go
                   to remove/update
                 type: string
+              offering:
+                description: List of slugs for tenant offerings
+                items:
+                  type: string
+                type: array
+              org:
+                description: Organization slug for project creation
+                type: string
+              project:
+                description: Slug of project containing tenants
+                type: string
             type: object
           status:
             description: status defines the observed state of WaldurCluster

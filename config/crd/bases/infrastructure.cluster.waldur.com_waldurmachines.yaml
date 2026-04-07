@@ -40,7 +40,7 @@ spec:
             description: spec defines the desired state of WaldurMachine
             properties:
               state:
-                description: State
+                description: Target VM state
                 type: string
             type: object
           status:

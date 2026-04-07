@@ -7,6 +7,15 @@ rules:
 - apiGroups:
   - infrastructure.cluster.waldur.com
   resources:
+  - machines
+  - machines/status
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - infrastructure.cluster.waldur.com
+  resources:
   - waldurclusters
   - waldurmachines
   verbs:
