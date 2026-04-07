@@ -8,4 +8,23 @@ layout:
 - go.kubebuilder.io/v4
 projectName: cluster-api-provider-waldur
 repo: github.com/sergei-zaiaev/cluster-api-provider-waldur
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: cluster.waldur.com
+  group: infrastructure
+  kind: WaldurCluster
+  path: github.com/sergei-zaiaev/cluster-api-provider-waldur/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: cluster.waldur.com
+  group: infrastructure
+  kind: WaldurMachine
+  path: github.com/sergei-zaiaev/cluster-api-provider-waldur/api/v1alpha1
+  version: v1alpha1
 version: "3"
