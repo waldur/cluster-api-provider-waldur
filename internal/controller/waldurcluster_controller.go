@@ -24,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/pkg/errors"
 	infrastructurev1alpha1 "github.com/sergei-zaiaev/cluster-api-provider-waldur/api/v1alpha1"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -31,17 +32,18 @@ import (
 	waldurclient "github.com/waldur/go-client"
 
 	util "sigs.k8s.io/cluster-api/util"
+	patch "sigs.k8s.io/cluster-api/util/patch"
 )
 
 // WaldurClusterReconciler reconciles a WaldurCluster object
 type WaldurClusterReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
-	waldur waldurclient.ClientWithResponses
+	Waldur waldurclient.ClientWithResponses
 }
 
 func (r *WaldurClusterReconciler) getOrCreateProject(ctx context.Context, projectSlug *string) (*waldurclient.Project, error) {
-	projectResponse, err := r.waldur.ProjectsListWithResponse(ctx, &waldurclient.ProjectsListParams{
+	projectResponse, err := r.Waldur.ProjectsListWithResponse(ctx, &waldurclient.ProjectsListParams{
 		Slug: projectSlug,
 	})
 
@@ -49,16 +51,16 @@ func (r *WaldurClusterReconciler) getOrCreateProject(ctx context.Context, projec
 		return nil, err
 	}
 
-	projects := projectResponse.JSON200
+	projects := *projectResponse.JSON200
 
-	if len(*projects) < 1 {
+	if len(projects) < 1 {
 		// create a project
 		projectData := waldurclient.ProjectsCreateJSONRequestBody{
 			Name:     *projectSlug,
 			Slug:     *&projectSlug,
 			Customer: "",
 		}
-		projectResponse, err := r.waldur.ProjectsCreateWithResponse(ctx, projectData)
+		projectResponse, err := r.Waldur.ProjectsCreateWithResponse(ctx, projectData)
 
 		if err != nil {
 			return nil, err
@@ -66,7 +68,7 @@ func (r *WaldurClusterReconciler) getOrCreateProject(ctx context.Context, projec
 
 		return projectResponse.JSON201, nil
 	} else {
-		return &(*projects)[0], nil
+		return &projects[0], nil
 	}
 
 }
@@ -118,6 +120,16 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		log.Info("Waiting for Cluster Controller to set OwnerRef on WaldurCluster")
 		return ctrl.Result{}, nil
 	}
+	
+	// Tenants already created
+	if waldurCluster.Status.Tenants != nil {
+		// Check tenant statuses
+		for _, tenant := range waldurCluster.Status.Tenants {
+			if tenant.State != waldurclient.CoreStatesOK {
+				return ctrl.Result{}, nil
+			}
+		}
+	}
 
 	projectSlug := waldurCluster.Spec.Project
 
@@ -129,12 +141,31 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	// TODO: create tenant(s) in the projects if not created
 	tenantOfferings := waldurCluster.Spec.Offerings
+	
+	createdOrders := make(map[string]infrastructurev1alpha1.WaldurOrder, len(tenantOfferings))
 
-	for _, offeringSlug := range *tenantOfferings {
+	for _, offeringSlug := range tenantOfferings {
 		offering, err := r.getOffering(ctx, &offeringSlug)
 		if err != nil {
-			r.submitTenantCreationOrder(ctx, offering, project)
+			order, err := r.submitTenantCreationOrder(ctx, offering, project)
+			if err != nil && order != nil {
+				waldurOrder := infrastructurev1alpha1.WaldurOrder{
+					State: *order.State,
+					ResourceUuid: *order.ResourceUuid,
+				}
+				createdOrders[offeringSlug] = waldurOrder
+			}
 		}
+	}
+	
+	helper, err := patch.NewHelper(&waldurCluster, r.Client)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	
+	waldurCluster.Status.Orders = createdOrders
+	if err := helper.Patch(ctx, &waldurCluster); err != nil {
+		return ctrl.Result{}, errors.Wrapf(err, "couldn't patch cluster %q", waldurCluster.Name)
 	}
 
 	return ctrl.Result{}, nil

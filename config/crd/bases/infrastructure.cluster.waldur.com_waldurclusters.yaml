@@ -39,11 +39,7 @@ spec:
           spec:
             description: spec defines the desired state of WaldurCluster
             properties:
-              foo:
-                description: foo is an example field of WaldurCluster. Edit waldurcluster_types.go
-                  to remove/update
-                type: string
-              offering:
+              offerings:
                 description: List of slugs for tenant offerings
                 items:
                   type: string
@@ -127,6 +123,28 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              orders:
+                additionalProperties:
+                  properties:
+                    resource_uuid:
+                      type: string
+                    state:
+                      description: OrderState defines model for OrderState.
+                      type: string
+                  type: object
+                description: List of created orders
+                type: object
+              tenants:
+                description: List of created tenants
+                items:
+                  properties:
+                    resource_uuid:
+                      type: string
+                    state:
+                      description: CoreStates defines model for CoreStates.
+                      type: string
+                  type: object
+                type: array
             type: object
         required:
         - spec

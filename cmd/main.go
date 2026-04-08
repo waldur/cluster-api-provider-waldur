@@ -19,6 +19,7 @@ package main
 import (
 	"crypto/tls"
 	"flag"
+	"net/http"
 	"os"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -37,7 +38,10 @@ import (
 
 	infrastructurev1alpha1 "github.com/sergei-zaiaev/cluster-api-provider-waldur/api/v1alpha1"
 	"github.com/sergei-zaiaev/cluster-api-provider-waldur/internal/controller"
+
 	// +kubebuilder:scaffold:imports
+
+	waldurclient "github.com/waldur/go-client"
 )
 
 var (
@@ -50,6 +54,23 @@ func init() {
 
 	utilruntime.Must(infrastructurev1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
+}
+
+func initWaldurClient(apiUrl string, apiToken string) (*waldurclient.ClientWithResponses, error) {
+	hc := http.Client{}
+	auth, err := waldurclient.NewTokenAuth(apiToken)
+	if err != nil {
+		setupLog.Error(err, "Error while creating token auth")
+		return nil, err
+	}
+
+	client, err := waldurclient.NewClientWithResponses(apiUrl, waldurclient.WithHTTPClient(&hc), waldurclient.WithRequestEditorFn(auth.Intercept))
+	if err != nil {
+		setupLog.Error(err, "Error creating Waldur client %s")
+		return nil, err
+	}
+
+	return client, nil
 }
 
 // nolint:gocyclo
@@ -177,10 +198,28 @@ func main() {
 		setupLog.Error(err, "Failed to start manager")
 		os.Exit(1)
 	}
+	
+	waldurApiUrl := os.Getenv("WALDUR_API_URL")
+	if waldurApiUrl == "" {
+		setupLog.Error("missing required env WALDUR_API_URL")
+		os.Exit(1)
+	}
+
+	waldurApiToken := os.Getenv("WALDUR_API_TOKEN")
+	if waldurApiToken == "" {
+	 	setupLog.Error("missing required env WALDUR_API_TOKEN")
+		os.Exit(1)
+	}
+	
+	waldur, err := initWaldurClient(waldurApiUrl, waldurApiToken)
+	if err != nil {
+		os.Exit(1)
+	}
 
 	if err := (&controller.WaldurClusterReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
+		Waldur: *waldur,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "WaldurCluster")
 		os.Exit(1)
