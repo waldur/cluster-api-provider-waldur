@@ -216,27 +216,28 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	for _, offeringSlug := range tenantOfferings {
 		offering, err := r.getOffering(ctx, offeringSlug)
 		if err != nil {
-			order, err := r.submitTenantCreationOrder(ctx, offering, project)
-			if err != nil && order != nil {
-				waldurOrder := infrastructurev1alpha1.WaldurOrder{
-					State:        *order.State,
-					ResourceUuid: order.MarketplaceResourceUuid.String(),
-				}
-				createdOrders[offeringSlug] = waldurOrder
-				tenant, err := r.getOpenStackTenant(ctx, order.ResourceUuid)
-				if err != nil {
-					createdTenants[offeringSlug] = infrastructurev1alpha1.OpenStackTenant{
-						Uuid:  tenant.Uuid.String(),
-						State: *tenant.State,
-					}
-				} else {
-					log.Error(err, "Unable to get tenant %s", order.ResourceUuid)
-				}
-			} else {
-				log.Error(err, "Unable to submit order for %s offering", offeringSlug)
-			}
-		} else {
-			log.Error(err, "Unable to get %s offering details", offeringSlug)
+			log.Error(err, "Unable to get offering details", "offering", offeringSlug)
+			continue
+		}
+
+		order, err := r.submitTenantCreationOrder(ctx, offering, project)
+		if err != nil || order == nil {
+			log.Error(err, "Unable to submit order for offering", "offering", offeringSlug)
+			continue
+		}
+		createdOrders[offeringSlug] = infrastructurev1alpha1.WaldurOrder{
+			State:        *order.State,
+			ResourceUuid: order.MarketplaceResourceUuid.String(),
+		}
+
+		tenant, err := r.getOpenStackTenant(ctx, order.ResourceUuid)
+		if err != nil {
+			log.Error(err, "Unable to get tenant", "resource_uuid", order.ResourceUuid)
+			continue
+		}
+		createdTenants[offeringSlug] = infrastructurev1alpha1.OpenStackTenant{
+			Uuid:  tenant.Uuid.String(),
+			State: *tenant.State,
 		}
 	}
 
@@ -246,6 +247,7 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	waldurCluster.Status.Orders = createdOrders
+	waldurCluster.Status.Tenants = createdTenants
 	if err := helper.Patch(ctx, &waldurCluster); err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "couldn't patch cluster %q", waldurCluster.Name)
 	}
