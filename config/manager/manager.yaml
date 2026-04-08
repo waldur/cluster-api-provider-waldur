@@ -66,6 +66,17 @@ spec:
         image: controller:latest
         name: manager
         ports: []
+        env:
+        - name: WALDUR_API_URL
+          valueFrom:
+            secretKeyRef:
+              name: waldur-api-secret
+              key: URL
+        - name: WALDUR_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: waldur-api-secret
+              key: TOKEN
         securityContext:
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false

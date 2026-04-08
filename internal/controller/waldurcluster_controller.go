@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -28,11 +29,15 @@ import (
 	infrastructurev1alpha1 "github.com/sergei-zaiaev/cluster-api-provider-waldur/api/v1alpha1"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	waldurclient "github.com/waldur/go-client"
 
 	util "sigs.k8s.io/cluster-api/util"
 	patch "sigs.k8s.io/cluster-api/util/patch"
+
+	openapitypes "github.com/oapi-codegen/runtime/types"
 )
 
 // WaldurClusterReconciler reconciles a WaldurCluster object
@@ -73,16 +78,66 @@ func (r *WaldurClusterReconciler) getOrCreateProject(ctx context.Context, projec
 
 }
 
-func (r *WaldurClusterReconciler) submitTenantCreationOrder(ctx context.Context, offering *waldurclient.Offering, project *waldurclient.Project) (*waldurclient.OrderDetails, error) {
-	// TODO
-	return nil, nil
+func (r *WaldurClusterReconciler) submitTenantCreationOrder(ctx context.Context, offering *waldurclient.PublicOfferingDetails, project *waldurclient.Project) (*waldurclient.OrderDetails, error) {
+	orderType := waldurclient.Create
+	rawAttrs := waldurclient.OpenStackTenantCreateOrderAttributes{}
+
+	attrs := waldurclient.OrderCreateRequest_Attributes{}
+	err := attrs.FromOpenStackTenantCreateOrderAttributes(rawAttrs)
+	if err != nil {
+		return nil, err
+	}
+
+	limits := map[string]int{}
+	orderPayload := waldurclient.MarketplaceOrdersCreateJSONRequestBody{
+		Project:    *project.Url,
+		Offering:   *offering.Url,
+		Type:       &orderType,
+		Limits:     &limits,
+		Attributes: &attrs,
+	}
+
+	orderResponse, err := r.Waldur.MarketplaceOrdersCreateWithResponse(ctx, orderPayload)
+	if err != nil {
+		return nil, err
+	}
+
+	if orderResponse.StatusCode() != 201 {
+		body := string(orderResponse.Body[:])
+		return nil, errors.New(fmt.Sprint("Unable to submit an order, details: %s", body))
+	}
+
+	return orderResponse.JSON201, nil
 }
 
-func (r *WaldurClusterReconciler) getOffering(ctx context.Context, offeringSlug *string) (*waldurclient.Offering, error) {
-	// offeringResponse, err := r.waldur.MarketplacePublicOfferingsList(ctx, &waldurclient.MarketplacePublicOfferingsListParams{
-	// 	Slug: offeringSlug,
-	// })
-	return nil, nil
+func (r *WaldurClusterReconciler) getOffering(ctx context.Context, offeringSlug string) (*waldurclient.PublicOfferingDetails, error) {
+	offeringResponse, err := r.Waldur.MarketplacePublicOfferingsListWithResponse(ctx, &waldurclient.MarketplacePublicOfferingsListParams{
+		Slug: &offeringSlug,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	offerings := *offeringResponse.JSON200
+	if len(offerings) == 0 {
+		msg := fmt.Sprintf("Unable to find an offering with slug %s", offeringSlug)
+		return nil, errors.New(msg)
+	}
+
+	offering := offerings[0]
+
+	return &offering, nil
+}
+
+func (r *WaldurClusterReconciler) getOpenStackTenant(ctx context.Context, tenantUuid *openapitypes.UUID) (*waldurclient.OpenStackTenant, error) {
+	tenantResponse, err := r.Waldur.OpenstackTenantsRetrieveWithResponse(ctx, *tenantUuid, &waldurclient.OpenstackTenantsRetrieveParams{})
+	if err != nil {
+		return nil, err
+	}
+
+	tenant := tenantResponse.JSON200
+
+	return tenant, nil
 }
 
 // +kubebuilder:rbac:groups=infrastructure.cluster.waldur.com,resources=waldurclusters,verbs=get;list;watch;create;update;patch;delete
@@ -120,7 +175,7 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		log.Info("Waiting for Cluster Controller to set OwnerRef on WaldurCluster")
 		return ctrl.Result{}, nil
 	}
-	
+
 	// Tenants already created
 	if waldurCluster.Status.Tenants != nil {
 		// Check tenant statuses
@@ -128,6 +183,19 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			if tenant.State != waldurclient.CoreStatesOK {
 				return ctrl.Result{}, nil
 			}
+		}
+	}
+
+	if len(waldurCluster.Status.Conditions) == 0 {
+		meta.SetStatusCondition(&waldurCluster.Status.Conditions, metav1.Condition{
+			Type:    "Progressing",
+			Status:  metav1.ConditionUnknown,
+			Reason:  "Reconciling",
+			Message: "Started reconciliation",
+		})
+		if err := r.Status().Update(ctx, &waldurCluster); err != nil {
+			log.Error(err, "Failed to update cluster status")
+			return ctrl.Result{}, err
 		}
 	}
 
@@ -141,28 +209,42 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	// TODO: create tenant(s) in the projects if not created
 	tenantOfferings := waldurCluster.Spec.Offerings
-	
+
 	createdOrders := make(map[string]infrastructurev1alpha1.WaldurOrder, len(tenantOfferings))
+	createdTenants := make(map[string]infrastructurev1alpha1.OpenStackTenant, len(tenantOfferings))
 
 	for _, offeringSlug := range tenantOfferings {
-		offering, err := r.getOffering(ctx, &offeringSlug)
+		offering, err := r.getOffering(ctx, offeringSlug)
 		if err != nil {
 			order, err := r.submitTenantCreationOrder(ctx, offering, project)
 			if err != nil && order != nil {
 				waldurOrder := infrastructurev1alpha1.WaldurOrder{
-					State: *order.State,
-					ResourceUuid: *order.ResourceUuid,
+					State:        *order.State,
+					ResourceUuid: order.MarketplaceResourceUuid.String(),
 				}
 				createdOrders[offeringSlug] = waldurOrder
+				tenant, err := r.getOpenStackTenant(ctx, order.ResourceUuid)
+				if err != nil {
+					createdTenants[offeringSlug] = infrastructurev1alpha1.OpenStackTenant{
+						Uuid:  tenant.Uuid.String(),
+						State: *tenant.State,
+					}
+				} else {
+					log.Error(err, "Unable to get tenant %s", order.ResourceUuid)
+				}
+			} else {
+				log.Error(err, "Unable to submit order for %s offering", offeringSlug)
 			}
+		} else {
+			log.Error(err, "Unable to get %s offering details", offeringSlug)
 		}
 	}
-	
+
 	helper, err := patch.NewHelper(&waldurCluster, r.Client)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	
+
 	waldurCluster.Status.Orders = createdOrders
 	if err := helper.Patch(ctx, &waldurCluster); err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "couldn't patch cluster %q", waldurCluster.Name)

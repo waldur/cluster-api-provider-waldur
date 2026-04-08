@@ -198,7 +198,7 @@ func main() {
 		setupLog.Error(err, "Failed to start manager")
 		os.Exit(1)
 	}
-	
+
 	waldurApiUrl := os.Getenv("WALDUR_API_URL")
 	if waldurApiUrl == "" {
 		setupLog.Error("missing required env WALDUR_API_URL")
@@ -207,10 +207,10 @@ func main() {
 
 	waldurApiToken := os.Getenv("WALDUR_API_TOKEN")
 	if waldurApiToken == "" {
-	 	setupLog.Error("missing required env WALDUR_API_TOKEN")
+		setupLog.Error("missing required env WALDUR_API_TOKEN")
 		os.Exit(1)
 	}
-	
+
 	waldur, err := initWaldurClient(waldurApiUrl, waldurApiToken)
 	if err != nil {
 		os.Exit(1)

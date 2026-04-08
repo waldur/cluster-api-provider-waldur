@@ -18,10 +18,12 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	
+
 	waldurclient "github.com/waldur/go-client"
-	
+
 	openapi_types "github.com/oapi-codegen/runtime/types"
+
+	uuid "github.com/google/uuid"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -33,13 +35,13 @@ type WaldurClusterSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 	// The following markers will use OpenAPI v3 schema to validate the value
 	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
-	
+
 	// Organization slug for project creation
 	Organization *string `json:"org,omitempty"`
-	
+
 	// Slug of project containing tenants
 	Project *string `json:"project,omitempty"`
-	
+
 	// List of slugs for tenant offerings
 	Offerings []string `json:"offerings,omitempty"`
 }
@@ -65,12 +67,12 @@ type WaldurClusterStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
-	
+
 	// List of created orders
 	Orders map[string]WaldurOrder `json:"orders,omitempty"`
-	
+
 	// List of created tenants
-	Tenants []OpenStackTenant `json:"tenants,omitempty"`
+	Tenants map[string]OpenStackTenant `json:"tenants,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -103,13 +105,13 @@ type WaldurClusterList struct {
 }
 
 type WaldurOrder struct {
-	State waldurclient.OrderState `json:"state,omitempty"`
-	ResourceUuid openapi_types.UUID `json:"resource_uuid,omitempty"`
+	State        waldurclient.OrderState `json:"state,omitempty"`
+	ResourceUuid string                  `json:"resource_uuid,omitempty"`
 }
 
 type OpenStackTenant struct {
 	State waldurclient.CoreStates `json:"state,omitempty"`
-	Uuid openapi_types.UUID `json:"resource_uuid,omitempty"`
+	Uuid  string                  `json:"resource_uuid,omitempty"`
 }
 
 func init() {
