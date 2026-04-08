@@ -35,7 +35,6 @@ import (
 	waldurclient "github.com/waldur/go-client"
 
 	util "sigs.k8s.io/cluster-api/util"
-	patch "sigs.k8s.io/cluster-api/util/patch"
 
 	openapitypes "github.com/oapi-codegen/runtime/types"
 )
@@ -240,15 +239,11 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 	}
 
-	helper, err := patch.NewHelper(&waldurCluster, r.Client)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
+	base := waldurCluster.DeepCopy()
 	waldurCluster.Status.Orders = createdOrders
 	waldurCluster.Status.Tenants = createdTenants
-	if err := helper.Patch(ctx, &waldurCluster); err != nil {
-		return ctrl.Result{}, errors.Wrapf(err, "couldn't patch cluster %q", waldurCluster.Name)
+	if err := r.Status().Patch(ctx, &waldurCluster, client.MergeFrom(base)); err != nil {
+		return ctrl.Result{}, errors.Wrapf(err, "couldn't patch status for cluster %q", waldurCluster.Name)
 	}
 
 	return ctrl.Result{}, nil
