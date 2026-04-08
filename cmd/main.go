@@ -64,9 +64,13 @@ func initWaldurClient(apiUrl string, apiToken string) (*waldurclient.ClientWithR
 		return nil, err
 	}
 
-	client, err := waldurclient.NewClientWithResponses(apiUrl, waldurclient.WithHTTPClient(&hc), waldurclient.WithRequestEditorFn(auth.Intercept))
+	client, err := waldurclient.NewClientWithResponses(
+		apiUrl,
+		waldurclient.WithHTTPClient(&hc),
+		waldurclient.WithRequestEditorFn(auth.Intercept),
+	)
 	if err != nil {
-		setupLog.Error(err, "Error creating Waldur client %s")
+		setupLog.Error(err, "Error creating Waldur client")
 		return nil, err
 	}
 
@@ -201,13 +205,13 @@ func main() {
 
 	waldurApiUrl := os.Getenv("WALDUR_API_URL")
 	if waldurApiUrl == "" {
-		setupLog.Error("missing required env WALDUR_API_URL")
+		setupLog.Info("missing required env WALDUR_API_URL")
 		os.Exit(1)
 	}
 
 	waldurApiToken := os.Getenv("WALDUR_API_TOKEN")
 	if waldurApiToken == "" {
-		setupLog.Error("missing required env WALDUR_API_TOKEN")
+		setupLog.Info("missing required env WALDUR_API_TOKEN")
 		os.Exit(1)
 	}
 

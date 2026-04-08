@@ -62,7 +62,6 @@ func (r *WaldurClusterReconciler) getOrCreateProject(ctx context.Context, projec
 		// create a project
 		projectData := waldurclient.ProjectsCreateJSONRequestBody{
 			Name:     *projectSlug,
-			Slug:     *&projectSlug,
 			Customer: "",
 		}
 		projectResponse, err := r.Waldur.ProjectsCreateWithResponse(ctx, projectData)
@@ -104,7 +103,7 @@ func (r *WaldurClusterReconciler) submitTenantCreationOrder(ctx context.Context,
 
 	if orderResponse.StatusCode() != 201 {
 		body := string(orderResponse.Body[:])
-		return nil, errors.New(fmt.Sprint("Unable to submit an order, details: %s", body))
+		return nil, errors.New(fmt.Sprintf("Unable to submit an order, details: %s", body))
 	}
 
 	return orderResponse.JSON201, nil
