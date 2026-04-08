@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -36,6 +37,7 @@ import (
 
 	util "sigs.k8s.io/cluster-api/util"
 
+	uuid "github.com/google/uuid"
 	openapitypes "github.com/oapi-codegen/runtime/types"
 )
 
@@ -46,9 +48,9 @@ type WaldurClusterReconciler struct {
 	Waldur waldurclient.ClientWithResponses
 }
 
-func (r *WaldurClusterReconciler) getOrCreateProject(ctx context.Context, projectSlug *string) (*waldurclient.Project, error) {
+func (r *WaldurClusterReconciler) getOrCreateProject(ctx context.Context, org *waldurclient.Customer, projectSlug string) (*waldurclient.Project, error) {
 	projectResponse, err := r.Waldur.ProjectsListWithResponse(ctx, &waldurclient.ProjectsListParams{
-		Slug: projectSlug,
+		Slug: &projectSlug,
 	})
 
 	if err != nil {
@@ -59,9 +61,10 @@ func (r *WaldurClusterReconciler) getOrCreateProject(ctx context.Context, projec
 
 	if len(projects) < 1 {
 		// create a project
+		name := fmt.Sprintf("%s_%s", *org.Slug, projectSlug)
 		projectData := waldurclient.ProjectsCreateJSONRequestBody{
-			Name:     *projectSlug,
-			Customer: "",
+			Name:     name,
+			Customer: *org.Url,
 		}
 		projectResponse, err := r.Waldur.ProjectsCreateWithResponse(ctx, projectData)
 
@@ -108,6 +111,48 @@ func (r *WaldurClusterReconciler) submitTenantCreationOrder(ctx context.Context,
 	return orderResponse.JSON201, nil
 }
 
+func (r *WaldurClusterReconciler) refreshTenant(ctx context.Context, existing infrastructurev1alpha1.OpenStackTenant) infrastructurev1alpha1.OpenStackTenant {
+	tenantUuid, err := uuid.Parse(existing.Uuid)
+	if err != nil {
+		return existing
+	}
+	refreshed, err := r.getOpenStackTenant(ctx, &tenantUuid)
+	if err != nil {
+		return existing
+	}
+	return infrastructurev1alpha1.OpenStackTenant{
+		Uuid:  refreshed.Uuid.String(),
+		State: *refreshed.State,
+	}
+}
+
+func (r *WaldurClusterReconciler) createTenant(ctx context.Context, offeringSlug string, project *waldurclient.Project) (*infrastructurev1alpha1.WaldurOrder, *infrastructurev1alpha1.OpenStackTenant, error) {
+	offering, err := r.getOffering(ctx, offeringSlug)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "unable to get offering details")
+	}
+
+	order, err := r.submitTenantCreationOrder(ctx, offering, project)
+	if err != nil || order == nil {
+		return nil, nil, errors.Wrap(err, "unable to submit order")
+	}
+	waldurOrder := &infrastructurev1alpha1.WaldurOrder{
+		State:        *order.State,
+		ResourceUuid: order.MarketplaceResourceUuid.String(),
+	}
+
+	tenant, err := r.getOpenStackTenant(ctx, order.ResourceUuid)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "unable to get tenant")
+	}
+	openStackTenant := &infrastructurev1alpha1.OpenStackTenant{
+		Uuid:  tenant.Uuid.String(),
+		State: *tenant.State,
+	}
+
+	return waldurOrder, openStackTenant, nil
+}
+
 func (r *WaldurClusterReconciler) getOffering(ctx context.Context, offeringSlug string) (*waldurclient.PublicOfferingDetails, error) {
 	offeringResponse, err := r.Waldur.MarketplacePublicOfferingsListWithResponse(ctx, &waldurclient.MarketplacePublicOfferingsListParams{
 		Slug: &offeringSlug,
@@ -136,6 +181,29 @@ func (r *WaldurClusterReconciler) getOpenStackTenant(ctx context.Context, tenant
 	tenant := tenantResponse.JSON200
 
 	return tenant, nil
+}
+
+func (r *WaldurClusterReconciler) getCustomer(ctx context.Context, orgSlug string) (*waldurclient.Customer, error) {
+	orgResponse, err := r.Waldur.CustomersListWithResponse(ctx, &waldurclient.CustomersListParams{
+		Slug: &orgSlug,
+	})
+
+	if err == nil {
+		return nil, err
+	}
+
+	if orgResponse.StatusCode() != 200 {
+		body := string(orgResponse.Body[:])
+		return nil, errors.New(fmt.Sprintf("Unable to get %s org, reason: %s", orgSlug, body))
+	}
+
+	orgs := *orgResponse.JSON200
+
+	if len(orgs) == 0 {
+		return nil, errors.New(fmt.Sprintf("Unable to fing an org with %s slug", orgSlug))
+	} else {
+		return &orgs[0], nil
+	}
 }
 
 // +kubebuilder:rbac:groups=infrastructure.cluster.waldur.com,resources=waldurclusters,verbs=get;list;watch;create;update;patch;delete
@@ -174,13 +242,17 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
-	// Tenants already created
+	// Check if all tenants are in OK state
 	if waldurCluster.Status.Tenants != nil {
 		// Check tenant statuses
+		tenantsOk := 0
 		for _, tenant := range waldurCluster.Status.Tenants {
-			if tenant.State != waldurclient.CoreStatesOK {
-				return ctrl.Result{}, nil
+			if tenant.State == waldurclient.CoreStatesOK {
+				tenantsOk++
 			}
+		}
+		if tenantsOk == len(waldurCluster.Spec.Offerings) {
+			return ctrl.Result{}, nil
 		}
 	}
 
@@ -197,51 +269,43 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 	}
 
-	projectSlug := waldurCluster.Spec.Project
-
-	project, err := r.getOrCreateProject(ctx, projectSlug)
+	orgSlug := waldurCluster.Spec.Organization
+	org, err := r.getCustomer(ctx, *orgSlug)
 
 	if err != nil {
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, err
 	}
 
-	// TODO: create tenant(s) in the projects if not created
+	projectSlug := waldurCluster.Spec.Project
+	project, err := r.getOrCreateProject(ctx, org, *projectSlug)
+
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
 	tenantOfferings := waldurCluster.Spec.Offerings
 
-	createdOrders := make(map[string]infrastructurev1alpha1.WaldurOrder, len(tenantOfferings))
-	createdTenants := make(map[string]infrastructurev1alpha1.OpenStackTenant, len(tenantOfferings))
+	ordersNew := maps.Clone(waldurCluster.Status.Orders)
+	tenantsNew := maps.Clone(waldurCluster.Status.Tenants)
 
 	for _, offeringSlug := range tenantOfferings {
-		offering, err := r.getOffering(ctx, offeringSlug)
-		if err != nil {
-			log.Error(err, "Unable to get offering details", "offering", offeringSlug)
+		if existing, ok := waldurCluster.Status.Tenants[offeringSlug]; ok {
+			tenantsNew[offeringSlug] = r.refreshTenant(ctx, existing)
 			continue
 		}
 
-		order, err := r.submitTenantCreationOrder(ctx, offering, project)
-		if err != nil || order == nil {
-			log.Error(err, "Unable to submit order for offering", "offering", offeringSlug)
-			continue
-		}
-		createdOrders[offeringSlug] = infrastructurev1alpha1.WaldurOrder{
-			State:        *order.State,
-			ResourceUuid: order.MarketplaceResourceUuid.String(),
-		}
-
-		tenant, err := r.getOpenStackTenant(ctx, order.ResourceUuid)
+		order, tenant, err := r.createTenant(ctx, offeringSlug, project)
 		if err != nil {
-			log.Error(err, "Unable to get tenant", "resource_uuid", order.ResourceUuid)
+			log.Error(err, "Unable to create tenant", "offering", offeringSlug)
 			continue
 		}
-		createdTenants[offeringSlug] = infrastructurev1alpha1.OpenStackTenant{
-			Uuid:  tenant.Uuid.String(),
-			State: *tenant.State,
-		}
+		ordersNew[offeringSlug] = *order
+		tenantsNew[offeringSlug] = *tenant
 	}
 
 	base := waldurCluster.DeepCopy()
-	waldurCluster.Status.Orders = createdOrders
-	waldurCluster.Status.Tenants = createdTenants
+	waldurCluster.Status.Orders = ordersNew
+	waldurCluster.Status.Tenants = tenantsNew
 	if err := r.Status().Patch(ctx, &waldurCluster, client.MergeFrom(base)); err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "couldn't patch status for cluster %q", waldurCluster.Name)
 	}
