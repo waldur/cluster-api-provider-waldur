@@ -4,6 +4,8 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
+  labels:
+    cluster.x-k8s.io/v1beta1: v1beta1
   name: waldurclusters.infrastructure.cluster.waldur.com
 spec:
   group: infrastructure.cluster.waldur.com
@@ -14,7 +16,7 @@ spec:
     singular: waldurcluster
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - name: v1beta1
     schema:
       openAPIV3Schema:
         description: WaldurCluster is the Schema for the waldurclusters API

@@ -27,7 +27,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/pkg/errors"
-	infrastructurev1alpha1 "github.com/sergei-zaiaev/cluster-api-provider-waldur/api/v1alpha1"
+	infrastructurev1beta1 "github.com/sergei-zaiaev/cluster-api-provider-waldur/api/v1beta1"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -49,8 +49,11 @@ type WaldurClusterReconciler struct {
 }
 
 func (r *WaldurClusterReconciler) getOrCreateProject(ctx context.Context, org *waldurclient.Customer, projectSlug string) (*waldurclient.Project, error) {
+	projectName := fmt.Sprintf("%s_%s", *org.Slug, projectSlug)
+	customerUuids := []openapitypes.UUID{*org.Uuid}
 	projectResponse, err := r.Waldur.ProjectsListWithResponse(ctx, &waldurclient.ProjectsListParams{
-		Slug: &projectSlug,
+		NameExact: &projectName,
+		Customer: &customerUuids,
 	})
 
 	if err != nil {
@@ -61,18 +64,17 @@ func (r *WaldurClusterReconciler) getOrCreateProject(ctx context.Context, org *w
 
 	if len(projects) < 1 {
 		// create a project
-		name := fmt.Sprintf("%s_%s", *org.Slug, projectSlug)
 		projectData := waldurclient.ProjectsCreateJSONRequestBody{
-			Name:     name,
+			Name:     projectName,
 			Customer: *org.Url,
 		}
-		projectResponse, err := r.Waldur.ProjectsCreateWithResponse(ctx, projectData)
+		projectCreateResponse, err := r.Waldur.ProjectsCreateWithResponse(ctx, projectData)
 
 		if err != nil {
 			return nil, err
 		}
 
-		return projectResponse.JSON201, nil
+		return projectCreateResponse.JSON201, nil
 	} else {
 		return &projects[0], nil
 	}
@@ -111,7 +113,7 @@ func (r *WaldurClusterReconciler) submitTenantCreationOrder(ctx context.Context,
 	return orderResponse.JSON201, nil
 }
 
-func (r *WaldurClusterReconciler) refreshTenant(ctx context.Context, existing infrastructurev1alpha1.OpenStackTenant) infrastructurev1alpha1.OpenStackTenant {
+func (r *WaldurClusterReconciler) refreshTenant(ctx context.Context, existing infrastructurev1beta1.OpenStackTenant) infrastructurev1beta1.OpenStackTenant {
 	tenantUuid, err := uuid.Parse(existing.Uuid)
 	if err != nil {
 		return existing
@@ -120,13 +122,13 @@ func (r *WaldurClusterReconciler) refreshTenant(ctx context.Context, existing in
 	if err != nil {
 		return existing
 	}
-	return infrastructurev1alpha1.OpenStackTenant{
+	return infrastructurev1beta1.OpenStackTenant{
 		Uuid:  refreshed.Uuid.String(),
 		State: *refreshed.State,
 	}
 }
 
-func (r *WaldurClusterReconciler) createTenant(ctx context.Context, offeringSlug string, project *waldurclient.Project) (*infrastructurev1alpha1.WaldurOrder, *infrastructurev1alpha1.OpenStackTenant, error) {
+func (r *WaldurClusterReconciler) createTenant(ctx context.Context, offeringSlug string, project *waldurclient.Project) (*infrastructurev1beta1.WaldurOrder, *infrastructurev1beta1.OpenStackTenant, error) {
 	offering, err := r.getOffering(ctx, offeringSlug)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "unable to get offering details")
@@ -136,7 +138,7 @@ func (r *WaldurClusterReconciler) createTenant(ctx context.Context, offeringSlug
 	if err != nil || order == nil {
 		return nil, nil, errors.Wrap(err, "unable to submit order")
 	}
-	waldurOrder := &infrastructurev1alpha1.WaldurOrder{
+	waldurOrder := &infrastructurev1beta1.WaldurOrder{
 		State:        *order.State,
 		ResourceUuid: order.MarketplaceResourceUuid.String(),
 	}
@@ -145,7 +147,7 @@ func (r *WaldurClusterReconciler) createTenant(ctx context.Context, offeringSlug
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "unable to get tenant")
 	}
-	openStackTenant := &infrastructurev1alpha1.OpenStackTenant{
+	openStackTenant := &infrastructurev1beta1.OpenStackTenant{
 		Uuid:  tenant.Uuid.String(),
 		State: *tenant.State,
 	}
@@ -154,9 +156,10 @@ func (r *WaldurClusterReconciler) createTenant(ctx context.Context, offeringSlug
 }
 
 func (r *WaldurClusterReconciler) getOffering(ctx context.Context, offeringSlug string) (*waldurclient.PublicOfferingDetails, error) {
-	offeringResponse, err := r.Waldur.MarketplacePublicOfferingsListWithResponse(ctx, &waldurclient.MarketplacePublicOfferingsListParams{
+	offeringParams := &waldurclient.MarketplacePublicOfferingsListParams{
 		Slug: &offeringSlug,
-	})
+	}
+	offeringResponse, err := r.Waldur.MarketplacePublicOfferingsListWithResponse(ctx, offeringParams)
 	if err != nil {
 		return nil, err
 	}
@@ -184,11 +187,18 @@ func (r *WaldurClusterReconciler) getOpenStackTenant(ctx context.Context, tenant
 }
 
 func (r *WaldurClusterReconciler) getCustomer(ctx context.Context, orgSlug string) (*waldurclient.Customer, error) {
-	orgResponse, err := r.Waldur.CustomersListWithResponse(ctx, &waldurclient.CustomersListParams{
+	fieldFiter := []waldurclient.CustomerFieldEnum{
+		waldurclient.CustomerFieldEnumUrl,
+		waldurclient.CustomerFieldEnumSlug,
+		waldurclient.CustomerFieldEnumUuid,
+	}
+	params := waldurclient.CustomersListParams{
 		Slug: &orgSlug,
-	})
+		Field: &fieldFiter,
+	}
+	orgResponse, err := r.Waldur.CustomersListWithResponse(ctx, &params)
 
-	if err == nil {
+	if err != nil {
 		return nil, err
 	}
 
@@ -223,7 +233,7 @@ func (r *WaldurClusterReconciler) getCustomer(ctx context.Context, orgSlug strin
 func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
-	var waldurCluster infrastructurev1alpha1.WaldurCluster
+	var waldurCluster infrastructurev1beta1.WaldurCluster
 	if err := r.Get(ctx, req.NamespacedName, &waldurCluster); err != nil {
 		if apierrors.IsNotFound(err) { // WaldurCluster isn't found
 			return ctrl.Result{}, nil
@@ -237,6 +247,9 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
+	// cluster is nil when the CAPI core Cluster controller hasn't set the ownerReference yet.
+	// This is a normal race at creation time — we return without requeuing because the
+	// ownerReference being set will trigger a new watch event and re-enqueue this reconciler.
 	if cluster == nil {
 		log.Info("Waiting for Cluster Controller to set OwnerRef on WaldurCluster")
 		return ctrl.Result{}, nil
@@ -316,7 +329,7 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 // SetupWithManager sets up the controller with the Manager.
 func (r *WaldurClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&infrastructurev1alpha1.WaldurCluster{}).
+		For(&infrastructurev1beta1.WaldurCluster{}).
 		Named("waldurcluster").
 		Complete(r)
 }

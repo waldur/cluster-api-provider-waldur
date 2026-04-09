@@ -27,7 +27,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	infrastructurev1alpha1 "github.com/sergei-zaiaev/cluster-api-provider-waldur/api/v1alpha1"
+	infrastructurev1beta1 "github.com/sergei-zaiaev/cluster-api-provider-waldur/api/v1beta1"
 )
 
 var _ = Describe("WaldurCluster Controller", func() {
@@ -40,13 +40,13 @@ var _ = Describe("WaldurCluster Controller", func() {
 			Name:      resourceName,
 			Namespace: "default", // TODO(user):Modify as needed
 		}
-		waldurcluster := &infrastructurev1alpha1.WaldurCluster{}
+		waldurcluster := &infrastructurev1beta1.WaldurCluster{}
 
 		BeforeEach(func() {
 			By("creating the custom resource for the Kind WaldurCluster")
 			err := k8sClient.Get(ctx, typeNamespacedName, waldurcluster)
 			if err != nil && errors.IsNotFound(err) {
-				resource := &infrastructurev1alpha1.WaldurCluster{
+				resource := &infrastructurev1beta1.WaldurCluster{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
 						Namespace: "default",
@@ -59,7 +59,7 @@ var _ = Describe("WaldurCluster Controller", func() {
 
 		AfterEach(func() {
 			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &infrastructurev1alpha1.WaldurCluster{}
+			resource := &infrastructurev1beta1.WaldurCluster{}
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
 			Expect(err).NotTo(HaveOccurred())
 
