@@ -194,6 +194,14 @@ github.com/waldur/go-client v0.0.0-20260408085033-448093d5ad8c h1:hGHngmxgH1cclb
 github.com/waldur/go-client v0.0.0-20260408085033-448093d5ad8c/go.mod h1:mFYRgtDg17/iN4+byM/7p2qk+BUUGtVaD8v5rOTjYQA=
 github.com/waldur/go-client v0.0.0-20260408233659-a7120d692216 h1:BvpmLPBGyn8w0me0xhl+J0fFOOj/QIg+NY3ohU5DP5A=
 github.com/waldur/go-client v0.0.0-20260408233659-a7120d692216/go.mod h1:mFYRgtDg17/iN4+byM/7p2qk+BUUGtVaD8v5rOTjYQA=
+github.com/waldur/go-client v0.0.0-20260409155115-cc902aeb03f9 h1:el2rW93HMP7h2zdCtHfmdb3GEnwryt1KtsWuGe527LQ=
+github.com/waldur/go-client v0.0.0-20260409155115-cc902aeb03f9/go.mod h1:mFYRgtDg17/iN4+byM/7p2qk+BUUGtVaD8v5rOTjYQA=
+github.com/waldur/go-client v0.0.0-20260409211900-cdbb2dcb56b4 h1:3MNtLSG0HDi0aQL63ROR7s6f6P5s32VzAnjJ8X2jSRI=
+github.com/waldur/go-client v0.0.0-20260409211900-cdbb2dcb56b4/go.mod h1:mFYRgtDg17/iN4+byM/7p2qk+BUUGtVaD8v5rOTjYQA=
+github.com/waldur/go-client v0.0.0-20260411103410-cae0ec902e61 h1:PtMWd74a8KP5GbT56JRI4L+dTaahEjEqa0v0kwIqVXE=
+github.com/waldur/go-client v0.0.0-20260411103410-cae0ec902e61/go.mod h1:mFYRgtDg17/iN4+byM/7p2qk+BUUGtVaD8v5rOTjYQA=
+github.com/waldur/go-client v0.0.0-20260411143901-f4b76336863a h1:zQRNV+0icl5ZQHYNw0YcOVTo+8kRHaf4TLlb1kF67N0=
+github.com/waldur/go-client v0.0.0-20260411143901-f4b76336863a/go.mod h1:mFYRgtDg17/iN4+byM/7p2qk+BUUGtVaD8v5rOTjYQA=
 github.com/x448/float16 v0.8.4 h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=
 github.com/x448/float16 v0.8.4/go.mod h1:14CWIYCyZA/cWjXOioeEpHeN/83MdbZDRQHoFcYsOfg=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=

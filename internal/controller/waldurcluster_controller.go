@@ -53,7 +53,7 @@ func (r *WaldurClusterReconciler) getOrCreateProject(ctx context.Context, org *w
 	customerUuids := []openapitypes.UUID{*org.Uuid}
 	projectResponse, err := r.Waldur.ProjectsListWithResponse(ctx, &waldurclient.ProjectsListParams{
 		NameExact: &projectName,
-		Customer: &customerUuids,
+		Customer:  &customerUuids,
 	})
 
 	if err != nil {
@@ -83,7 +83,12 @@ func (r *WaldurClusterReconciler) getOrCreateProject(ctx context.Context, org *w
 
 func (r *WaldurClusterReconciler) submitTenantCreationOrder(ctx context.Context, offering *waldurclient.PublicOfferingDetails, project *waldurclient.Project) (*waldurclient.OrderDetails, error) {
 	orderType := waldurclient.Create
-	rawAttrs := waldurclient.OpenStackTenantCreateOrderAttributes{}
+	
+	subnetCidr := "192.168.42.0/24" // TODO: make configurable
+	rawAttrs := waldurclient.OpenStackTenantCreateOrderAttributes{
+		Name: "test-00",
+		SubnetCidr: &subnetCidr,
+	}
 
 	attrs := waldurclient.OrderCreateRequest_Attributes{}
 	err := attrs.FromOpenStackTenantCreateOrderAttributes(rawAttrs)
@@ -91,13 +96,25 @@ func (r *WaldurClusterReconciler) submitTenantCreationOrder(ctx context.Context,
 		return nil, err
 	}
 
-	limits := map[string]int{}
+	limits := map[string]int{ // TODO: calculate based on node configs
+		"core": 8,
+		"ram": 16 * 1024,
+		"storage": 50 * 1024,
+	}
+
+	plans := *offering.Plans
+	plan := plans[0] // TODO: select a plan based on user input
+	planUrl := plan.Url
+	acceptingTermsOfService := true
+
 	orderPayload := waldurclient.MarketplaceOrdersCreateJSONRequestBody{
-		Project:    *project.Url,
-		Offering:   *offering.Url,
 		Type:       &orderType,
-		Limits:     &limits,
+		Offering:   *offering.Url,
+		Project:    *project.Url,
+		Plan:       planUrl,
 		Attributes: &attrs,
+		Limits:     &limits,
+		AcceptingTermsOfService: &acceptingTermsOfService,
 	}
 
 	orderResponse, err := r.Waldur.MarketplaceOrdersCreateWithResponse(ctx, orderPayload)
@@ -193,7 +210,7 @@ func (r *WaldurClusterReconciler) getCustomer(ctx context.Context, orgSlug strin
 		waldurclient.CustomerFieldEnumUuid,
 	}
 	params := waldurclient.CustomersListParams{
-		Slug: &orgSlug,
+		Slug:  &orgSlug,
 		Field: &fieldFiter,
 	}
 	orgResponse, err := r.Waldur.CustomersListWithResponse(ctx, &params)
