@@ -125,20 +125,25 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              orders:
-                additionalProperties:
-                  properties:
-                    resource_uuid:
-                      type: string
-                    state:
-                      description: OrderState defines model for OrderState.
-                      type: string
-                  type: object
-                description: List of created orders
-                type: object
               tenants:
                 additionalProperties:
                   properties:
+                    orders:
+                      description: The currently executing order
+                      properties:
+                        resource_uuid:
+                          type: string
+                        state:
+                          description: OrderState defines model for OrderState.
+                          type: string
+                        tenant_uuid:
+                          type: string
+                        type:
+                          description: RequestTypes defines model for RequestTypes.
+                          type: string
+                        uuid:
+                          type: string
+                      type: object
                     resource_uuid:
                       type: string
                     state:

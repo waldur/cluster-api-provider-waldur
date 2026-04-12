@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -83,10 +84,10 @@ func (r *WaldurClusterReconciler) getOrCreateProject(ctx context.Context, org *w
 
 func (r *WaldurClusterReconciler) submitTenantCreationOrder(ctx context.Context, offering *waldurclient.PublicOfferingDetails, project *waldurclient.Project) (*waldurclient.OrderDetails, error) {
 	orderType := waldurclient.Create
-	
+
 	subnetCidr := "192.168.42.0/24" // TODO: make configurable
 	rawAttrs := waldurclient.OpenStackTenantCreateOrderAttributes{
-		Name: "test-00",
+		Name:       "test-00",
 		SubnetCidr: &subnetCidr,
 	}
 
@@ -97,8 +98,8 @@ func (r *WaldurClusterReconciler) submitTenantCreationOrder(ctx context.Context,
 	}
 
 	limits := map[string]int{ // TODO: calculate based on node configs
-		"core": 8,
-		"ram": 16 * 1024,
+		"cores":   8,
+		"ram":     16 * 1024,
 		"storage": 50 * 1024,
 	}
 
@@ -108,12 +109,12 @@ func (r *WaldurClusterReconciler) submitTenantCreationOrder(ctx context.Context,
 	acceptingTermsOfService := true
 
 	orderPayload := waldurclient.MarketplaceOrdersCreateJSONRequestBody{
-		Type:       &orderType,
-		Offering:   *offering.Url,
-		Project:    *project.Url,
-		Plan:       planUrl,
-		Attributes: &attrs,
-		Limits:     &limits,
+		Type:                    &orderType,
+		Offering:                *offering.Url,
+		Project:                 *project.Url,
+		Plan:                    planUrl,
+		Attributes:              &attrs,
+		Limits:                  &limits,
 		AcceptingTermsOfService: &acceptingTermsOfService,
 	}
 
@@ -130,46 +131,102 @@ func (r *WaldurClusterReconciler) submitTenantCreationOrder(ctx context.Context,
 	return orderResponse.JSON201, nil
 }
 
-func (r *WaldurClusterReconciler) refreshTenant(ctx context.Context, existing infrastructurev1beta1.OpenStackTenant) infrastructurev1beta1.OpenStackTenant {
-	tenantUuid, err := uuid.Parse(existing.Uuid)
+func (r *WaldurClusterReconciler) refreshTenant(ctx context.Context, existing *infrastructurev1beta1.OpenStackTenant) error {
+	if existing.Order != nil && !isOrderTerminal(existing.Order.State) {
+		if err := r.refreshOrder(ctx, existing.Order); err != nil {
+			return errors.Wrap(err, "unable to refresh order")
+		}
+		// If the order just got a tenant UUID, populate it on the tenant
+		if existing.Uuid == nil && existing.Order.TenantUuid != nil {
+			existing.Uuid = existing.Order.TenantUuid
+		}
+	}
+
+	if existing.Uuid == nil {
+		return nil
+	}
+	tenantUuid, err := uuid.Parse(*existing.Uuid)
 	if err != nil {
-		return existing
+		return err
 	}
 	refreshed, err := r.getOpenStackTenant(ctx, &tenantUuid)
 	if err != nil {
-		return existing
+		return err
 	}
-	return infrastructurev1beta1.OpenStackTenant{
-		Uuid:  refreshed.Uuid.String(),
-		State: *refreshed.State,
-	}
+	uuidStr := refreshed.Uuid.String()
+	existing.Uuid = &uuidStr
+	existing.State = *refreshed.State
+	return nil
 }
 
-func (r *WaldurClusterReconciler) createTenant(ctx context.Context, offeringSlug string, project *waldurclient.Project) (*infrastructurev1beta1.WaldurOrder, *infrastructurev1beta1.OpenStackTenant, error) {
+func isOrderTerminal(state waldurclient.OrderState) bool {
+	return state == waldurclient.OrderStateDone ||
+		state == waldurclient.OrderStateErred ||
+		state == waldurclient.OrderStateCanceled
+}
+
+func (r *WaldurClusterReconciler) refreshOrder(ctx context.Context, existingOrder *infrastructurev1beta1.WaldurOrder) error {
+	orderUuid, err := uuid.Parse(existingOrder.Uuid)
+	if err != nil {
+		return err
+	}
+
+	orderResponse, err := r.Waldur.MarketplaceOrdersRetrieveWithResponse(ctx, orderUuid, &waldurclient.MarketplaceOrdersRetrieveParams{})
+	if err != nil {
+		return err
+	}
+
+	order := orderResponse.JSON200
+
+	existingOrder.State = *order.State
+
+	if order.ResourceUuid != nil {
+		tenantUuid := order.ResourceUuid.String()
+		existingOrder.TenantUuid = &tenantUuid
+	}
+
+	return nil
+}
+
+func (r *WaldurClusterReconciler) createTenant(ctx context.Context, offeringSlug string, project *waldurclient.Project) (*infrastructurev1beta1.OpenStackTenant, error) {
 	offering, err := r.getOffering(ctx, offeringSlug)
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "unable to get offering details")
+		return nil, errors.Wrap(err, "unable to get offering details")
 	}
 
 	order, err := r.submitTenantCreationOrder(ctx, offering, project)
 	if err != nil || order == nil {
-		return nil, nil, errors.Wrap(err, "unable to submit order")
+		return nil, errors.Wrap(err, "unable to submit order")
 	}
+
 	waldurOrder := &infrastructurev1beta1.WaldurOrder{
+		Uuid:         order.Uuid.String(),
+		Type:         *order.Type,
 		State:        *order.State,
 		ResourceUuid: order.MarketplaceResourceUuid.String(),
 	}
 
-	tenant, err := r.getOpenStackTenant(ctx, order.ResourceUuid)
-	if err != nil {
-		return nil, nil, errors.Wrap(err, "unable to get tenant")
-	}
+	tenantUuid := order.ResourceUuid
 	openStackTenant := &infrastructurev1beta1.OpenStackTenant{
-		Uuid:  tenant.Uuid.String(),
-		State: *tenant.State,
+		Order: waldurOrder,
 	}
 
-	return waldurOrder, openStackTenant, nil
+	if tenantUuid == nil {
+		openStackTenant.Uuid = nil
+		openStackTenant.State = waldurclient.CoreStatesCREATING
+	} else {
+		tenantUuidStr := tenantUuid.String()
+		waldurOrder.TenantUuid = &tenantUuidStr
+
+		tenant, err := r.getOpenStackTenant(ctx, tenantUuid)
+		if err != nil {
+			return nil, errors.Wrap(err, "unable to get tenant")
+		}
+		openStackTenant.Uuid = &tenantUuidStr
+		openStackTenant.State = *tenant.State
+	}
+
+	return openStackTenant, nil
 }
 
 func (r *WaldurClusterReconciler) getOffering(ctx context.Context, offeringSlug string) (*waldurclient.PublicOfferingDetails, error) {
@@ -315,32 +372,46 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	tenantOfferings := waldurCluster.Spec.Offerings
 
-	ordersNew := maps.Clone(waldurCluster.Status.Orders)
 	tenantsNew := maps.Clone(waldurCluster.Status.Tenants)
 
 	for _, offeringSlug := range tenantOfferings {
 		if existing, ok := waldurCluster.Status.Tenants[offeringSlug]; ok {
-			tenantsNew[offeringSlug] = r.refreshTenant(ctx, existing)
+			err = r.refreshTenant(ctx, &existing)
+			if err != nil {
+				log.Error(err, "Unable to refresh tenant", "uuid", existing.Uuid)
+			}
+			tenantsNew[offeringSlug] = existing
 			continue
 		}
 
-		order, tenant, err := r.createTenant(ctx, offeringSlug, project)
+		tenant, err := r.createTenant(ctx, offeringSlug, project)
 		if err != nil {
 			log.Error(err, "Unable to create tenant", "offering", offeringSlug)
 			continue
 		}
-		ordersNew[offeringSlug] = *order
 		tenantsNew[offeringSlug] = *tenant
 	}
 
 	base := waldurCluster.DeepCopy()
-	waldurCluster.Status.Orders = ordersNew
 	waldurCluster.Status.Tenants = tenantsNew
 	if err := r.Status().Patch(ctx, &waldurCluster, client.MergeFrom(base)); err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "couldn't patch status for cluster %q", waldurCluster.Name)
 	}
 
+	if anyTenantPending(tenantsNew) {
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+	}
+
 	return ctrl.Result{}, nil
+}
+
+func anyTenantPending(tenants map[string]infrastructurev1beta1.OpenStackTenant) bool {
+	for _, t := range tenants {
+		if t.State != waldurclient.CoreStatesOK && t.State != waldurclient.CoreStatesERRED {
+			return true
+		}
+	}
+	return false
 }
 
 // SetupWithManager sets up the controller with the Manager.
