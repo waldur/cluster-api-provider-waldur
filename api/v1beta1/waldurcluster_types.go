@@ -99,16 +99,17 @@ type WaldurClusterList struct {
 }
 
 type WaldurOrder struct {
-	Uuid         string                    `json:"uuid,omitempty"`
-	Type         waldurclient.RequestTypes `json:"type,omitempty"`
-	State        waldurclient.OrderState   `json:"state,omitempty"`
-	ResourceUuid string                    `json:"resource_uuid,omitempty"`
-	TenantUuid   *string                   `json:"tenant_uuid,omitempty"`
+	Uuid                    string                    `json:"uuid,omitempty"`
+	Type                    waldurclient.RequestTypes `json:"type,omitempty"`
+	State                   waldurclient.OrderState   `json:"state,omitempty"`
+	MarketplaceResourceUuid string                    `json:"resource_uuid,omitempty"`
+	ResourceUuid            *string                   `json:"tenant_uuid,omitempty"`
 }
 
 type OpenStackTenant struct {
 	State waldurclient.CoreStates `json:"state,omitempty"`
 	Uuid  *string                 `json:"resource_uuid,omitempty"`
+	Name  string                  `json:"name,omitempty"`
 	// The currently executing order
 	Order *WaldurOrder `json:"orders,omitempty"`
 }

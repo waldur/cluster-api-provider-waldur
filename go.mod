@@ -6,7 +6,7 @@ require (
 	github.com/onsi/ginkgo/v2 v2.27.2
 	github.com/onsi/gomega v1.38.2
 	github.com/pkg/errors v0.9.1
-	github.com/waldur/go-client v0.0.0-20260411143901-f4b76336863a
+	github.com/waldur/go-client v0.0.0-20260412234910-e7815bae9ed2
 	k8s.io/apimachinery v0.35.3
 	k8s.io/client-go v0.35.0
 	sigs.k8s.io/cluster-api v1.12.4

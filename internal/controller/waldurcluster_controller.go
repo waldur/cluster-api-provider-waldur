@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"maps"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -86,8 +85,9 @@ func (r *WaldurClusterReconciler) submitTenantCreationOrder(ctx context.Context,
 	orderType := waldurclient.Create
 
 	subnetCidr := "192.168.42.0/24" // TODO: make configurable
+	tenantName := fmt.Sprintf("%s-%s", *offering.Slug, *project.Name)
 	rawAttrs := waldurclient.OpenStackTenantCreateOrderAttributes{
-		Name:       "test-00",
+		Name:       tenantName,
 		SubnetCidr: &subnetCidr,
 	}
 
@@ -137,8 +137,8 @@ func (r *WaldurClusterReconciler) refreshTenant(ctx context.Context, existing *i
 			return errors.Wrap(err, "unable to refresh order")
 		}
 		// If the order just got a tenant UUID, populate it on the tenant
-		if existing.Uuid == nil && existing.Order.TenantUuid != nil {
-			existing.Uuid = existing.Order.TenantUuid
+		if existing.Uuid == nil && existing.Order.ResourceUuid != nil {
+			existing.Uuid = existing.Order.ResourceUuid
 		}
 	}
 
@@ -156,6 +156,7 @@ func (r *WaldurClusterReconciler) refreshTenant(ctx context.Context, existing *i
 	uuidStr := refreshed.Uuid.String()
 	existing.Uuid = &uuidStr
 	existing.State = *refreshed.State
+	existing.Name = *refreshed.Name
 	return nil
 }
 
@@ -182,7 +183,7 @@ func (r *WaldurClusterReconciler) refreshOrder(ctx context.Context, existingOrde
 
 	if order.ResourceUuid != nil {
 		tenantUuid := order.ResourceUuid.String()
-		existingOrder.TenantUuid = &tenantUuid
+		existingOrder.ResourceUuid = &tenantUuid
 	}
 
 	return nil
@@ -200,15 +201,16 @@ func (r *WaldurClusterReconciler) createTenant(ctx context.Context, offeringSlug
 	}
 
 	waldurOrder := &infrastructurev1beta1.WaldurOrder{
-		Uuid:         order.Uuid.String(),
-		Type:         *order.Type,
-		State:        *order.State,
-		ResourceUuid: order.MarketplaceResourceUuid.String(),
+		Uuid:                    order.Uuid.String(),
+		Type:                    *order.Type,
+		State:                   *order.State,
+		MarketplaceResourceUuid: order.MarketplaceResourceUuid.String(),
 	}
 
 	tenantUuid := order.ResourceUuid
 	openStackTenant := &infrastructurev1beta1.OpenStackTenant{
 		Order: waldurOrder,
+		Name:  *order.ResourceName,
 	}
 
 	if tenantUuid == nil {
@@ -216,7 +218,7 @@ func (r *WaldurClusterReconciler) createTenant(ctx context.Context, offeringSlug
 		openStackTenant.State = waldurclient.CoreStatesCREATING
 	} else {
 		tenantUuidStr := tenantUuid.String()
-		waldurOrder.TenantUuid = &tenantUuidStr
+		waldurOrder.ResourceUuid = &tenantUuidStr
 
 		tenant, err := r.getOpenStackTenant(ctx, tenantUuid)
 		if err != nil {
@@ -329,20 +331,6 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
-	// Check if all tenants are in OK state
-	if waldurCluster.Status.Tenants != nil {
-		// Check tenant statuses
-		tenantsOk := 0
-		for _, tenant := range waldurCluster.Status.Tenants {
-			if tenant.State == waldurclient.CoreStatesOK {
-				tenantsOk++
-			}
-		}
-		if tenantsOk == len(waldurCluster.Spec.Offerings) {
-			return ctrl.Result{}, nil
-		}
-	}
-
 	if len(waldurCluster.Status.Conditions) == 0 {
 		meta.SetStatusCondition(&waldurCluster.Status.Conditions, metav1.Condition{
 			Type:    "Progressing",
@@ -355,6 +343,8 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			return ctrl.Result{}, err
 		}
 	}
+
+	base := waldurCluster.DeepCopy()
 
 	orgSlug := waldurCluster.Spec.Organization
 	org, err := r.getCustomer(ctx, *orgSlug)
@@ -372,15 +362,12 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	tenantOfferings := waldurCluster.Spec.Offerings
 
-	tenantsNew := maps.Clone(waldurCluster.Status.Tenants)
-
 	for _, offeringSlug := range tenantOfferings {
 		if existing, ok := waldurCluster.Status.Tenants[offeringSlug]; ok {
 			err = r.refreshTenant(ctx, &existing)
 			if err != nil {
 				log.Error(err, "Unable to refresh tenant", "uuid", existing.Uuid)
 			}
-			tenantsNew[offeringSlug] = existing
 			continue
 		}
 
@@ -389,17 +376,29 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			log.Error(err, "Unable to create tenant", "offering", offeringSlug)
 			continue
 		}
-		tenantsNew[offeringSlug] = *tenant
+		waldurCluster.Status.Tenants[offeringSlug] = *tenant
 	}
 
-	base := waldurCluster.DeepCopy()
-	waldurCluster.Status.Tenants = tenantsNew
-	if err := r.Status().Patch(ctx, &waldurCluster, client.MergeFrom(base)); err != nil {
+	patch := client.MergeFrom(base)
+	if err := r.Status().Patch(ctx, &waldurCluster, patch); err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "couldn't patch status for cluster %q", waldurCluster.Name)
 	}
 
-	if anyTenantPending(tenantsNew) {
+	if anyTenantPending(waldurCluster.Status.Tenants) {
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+	}
+
+	if waldurCluster.Status.Conditions != nil && waldurCluster.Status.Conditions[len(waldurCluster.Status.Conditions)-1].Type != "Available" {
+		meta.SetStatusCondition(&waldurCluster.Status.Conditions, metav1.Condition{
+			Type:    "Available",
+			Status:  metav1.ConditionUnknown,
+			Reason:  "Reconciliation",
+			Message: "Finished reconciliation",
+		})
+		if err := r.Status().Update(ctx, &waldurCluster); err != nil {
+			log.Error(err, "Failed to update cluster status")
+			return ctrl.Result{}, err
+		}
 	}
 
 	return ctrl.Result{}, nil

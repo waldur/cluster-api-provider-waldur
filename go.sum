@@ -202,6 +202,8 @@ github.com/waldur/go-client v0.0.0-20260411103410-cae0ec902e61 h1:PtMWd74a8KP5Gb
 github.com/waldur/go-client v0.0.0-20260411103410-cae0ec902e61/go.mod h1:mFYRgtDg17/iN4+byM/7p2qk+BUUGtVaD8v5rOTjYQA=
 github.com/waldur/go-client v0.0.0-20260411143901-f4b76336863a h1:zQRNV+0icl5ZQHYNw0YcOVTo+8kRHaf4TLlb1kF67N0=
 github.com/waldur/go-client v0.0.0-20260411143901-f4b76336863a/go.mod h1:mFYRgtDg17/iN4+byM/7p2qk+BUUGtVaD8v5rOTjYQA=
+github.com/waldur/go-client v0.0.0-20260412234910-e7815bae9ed2 h1:xg+Qpa0CRXeffkgCoyZrPxmowIUIhwKDqNfcJY8+aCQ=
+github.com/waldur/go-client v0.0.0-20260412234910-e7815bae9ed2/go.mod h1:mFYRgtDg17/iN4+byM/7p2qk+BUUGtVaD8v5rOTjYQA=
 github.com/x448/float16 v0.8.4 h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=
 github.com/x448/float16 v0.8.4/go.mod h1:14CWIYCyZA/cWjXOioeEpHeN/83MdbZDRQHoFcYsOfg=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=

@@ -128,6 +128,8 @@ spec:
               tenants:
                 additionalProperties:
                   properties:
+                    name:
+                      type: string
                     orders:
                       description: The currently executing order
                       properties:
