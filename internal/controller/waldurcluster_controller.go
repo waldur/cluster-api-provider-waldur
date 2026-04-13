@@ -28,6 +28,7 @@ import (
 
 	"github.com/pkg/errors"
 	infrastructurev1beta1 "github.com/sergei-zaiaev/cluster-api-provider-waldur/api/v1beta1"
+	"k8s.io/utils/ptr"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -373,7 +374,7 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			Reason:  "Provisioning",
 			Message: "Waiting for tenants to be provisioned",
 		})
-		waldurCluster.Status.Ready = false
+		waldurCluster.Status.Initialization = &infrastructurev1beta1.WaldurClusterInitialization{Provisioned: ptr.To(false)}
 	} else if anyTenantErred(waldurCluster.Status.Tenants) {
 		meta.SetStatusCondition(&waldurCluster.Status.Conditions, metav1.Condition{
 			Type:    "Ready",
@@ -381,7 +382,7 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			Reason:  "ProvisioningFailed",
 			Message: "One or more tenants failed to provision",
 		})
-		waldurCluster.Status.Ready = false
+		waldurCluster.Status.Initialization = &infrastructurev1beta1.WaldurClusterInitialization{Provisioned: ptr.To(false)}
 	} else {
 		meta.SetStatusCondition(&waldurCluster.Status.Conditions, metav1.Condition{
 			Type:    "Ready",
@@ -389,7 +390,7 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			Reason:  "Provisioned",
 			Message: "All tenants are ready",
 		})
-		waldurCluster.Status.Ready = true
+		waldurCluster.Status.Initialization = &infrastructurev1beta1.WaldurClusterInitialization{Provisioned: ptr.To(true)}
 	}
 
 	if err := r.Status().Patch(ctx, &waldurCluster, client.MergeFrom(base)); err != nil {

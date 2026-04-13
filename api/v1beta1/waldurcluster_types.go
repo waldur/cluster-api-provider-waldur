@@ -64,19 +64,25 @@ type WaldurClusterStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// Ready indicates the infrastructure has been fully provisioned.
-	// Required by the CAPI v1beta1 contract — the core Cluster controller reads
-	// status.ready to determine when to advance the cluster phase.
+	// Initialization provides information about infrastructure initialization.
+	// Required by the CAPI v1beta2 contract — the core Cluster controller reads
+	// status.initialization.provisioned to determine when to advance the cluster phase.
 	// +optional
-	Ready bool `json:"ready,omitempty"`
+	Initialization *WaldurClusterInitialization `json:"initialization,omitempty"`
 
 	// List of created tenants
 	Tenants map[string]OpenStackTenant `json:"tenants,omitempty"`
 }
 
+type WaldurClusterInitialization struct {
+	// Provisioned indicates the infrastructure has been provisioned.
+	// +optional
+	Provisioned *bool `json:"provisioned,omitempty"`
+}
+
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:metadata:labels="cluster.x-k8s.io/v1beta1=v1beta1"
+// +kubebuilder:metadata:labels="cluster.x-k8s.io/v1beta2=v1beta2"
 
 // WaldurCluster is the Schema for the waldurclusters API
 type WaldurCluster struct {
