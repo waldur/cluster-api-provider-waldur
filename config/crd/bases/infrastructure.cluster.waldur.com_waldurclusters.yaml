@@ -125,6 +125,12 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              ready:
+                description: |-
+                  Ready indicates the infrastructure has been fully provisioned.
+                  Required by the CAPI v1beta1 contract — the core Cluster controller reads
+                  status.ready to determine when to advance the cluster phase.
+                type: boolean
               tenants:
                 additionalProperties:
                   properties:

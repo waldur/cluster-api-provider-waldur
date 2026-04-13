@@ -64,6 +64,12 @@ type WaldurClusterStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
+	// Ready indicates the infrastructure has been fully provisioned.
+	// Required by the CAPI v1beta1 contract — the core Cluster controller reads
+	// status.ready to determine when to advance the cluster phase.
+	// +optional
+	Ready bool `json:"ready,omitempty"`
+
 	// List of created tenants
 	Tenants map[string]OpenStackTenant `json:"tenants,omitempty"`
 }

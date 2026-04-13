@@ -331,19 +331,6 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
-	if len(waldurCluster.Status.Conditions) == 0 {
-		meta.SetStatusCondition(&waldurCluster.Status.Conditions, metav1.Condition{
-			Type:    "Progressing",
-			Status:  metav1.ConditionUnknown,
-			Reason:  "Reconciling",
-			Message: "Started reconciliation",
-		})
-		if err := r.Status().Update(ctx, &waldurCluster); err != nil {
-			log.Error(err, "Failed to update cluster status")
-			return ctrl.Result{}, err
-		}
-	}
-
 	base := waldurCluster.DeepCopy()
 
 	orgSlug := waldurCluster.Spec.Organization
@@ -379,8 +366,33 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		waldurCluster.Status.Tenants[offeringSlug] = *tenant
 	}
 
-	patch := client.MergeFrom(base)
-	if err := r.Status().Patch(ctx, &waldurCluster, patch); err != nil {
+	if anyTenantPending(waldurCluster.Status.Tenants) {
+		meta.SetStatusCondition(&waldurCluster.Status.Conditions, metav1.Condition{
+			Type:    "Ready",
+			Status:  metav1.ConditionFalse,
+			Reason:  "Provisioning",
+			Message: "Waiting for tenants to be provisioned",
+		})
+		waldurCluster.Status.Ready = false
+	} else if anyTenantErred(waldurCluster.Status.Tenants) {
+		meta.SetStatusCondition(&waldurCluster.Status.Conditions, metav1.Condition{
+			Type:    "Ready",
+			Status:  metav1.ConditionFalse,
+			Reason:  "ProvisioningFailed",
+			Message: "One or more tenants failed to provision",
+		})
+		waldurCluster.Status.Ready = false
+	} else {
+		meta.SetStatusCondition(&waldurCluster.Status.Conditions, metav1.Condition{
+			Type:    "Ready",
+			Status:  metav1.ConditionTrue,
+			Reason:  "Provisioned",
+			Message: "All tenants are ready",
+		})
+		waldurCluster.Status.Ready = true
+	}
+
+	if err := r.Status().Patch(ctx, &waldurCluster, client.MergeFrom(base)); err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "couldn't patch status for cluster %q", waldurCluster.Name)
 	}
 
@@ -388,20 +400,16 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
-	if waldurCluster.Status.Conditions != nil && waldurCluster.Status.Conditions[len(waldurCluster.Status.Conditions)-1].Type != "Available" {
-		meta.SetStatusCondition(&waldurCluster.Status.Conditions, metav1.Condition{
-			Type:    "Available",
-			Status:  metav1.ConditionUnknown,
-			Reason:  "Reconciliation",
-			Message: "Finished reconciliation",
-		})
-		if err := r.Status().Update(ctx, &waldurCluster); err != nil {
-			log.Error(err, "Failed to update cluster status")
-			return ctrl.Result{}, err
+	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+}
+
+func anyTenantErred(tenants map[string]infrastructurev1beta1.OpenStackTenant) bool {
+	for _, t := range tenants {
+		if t.State == waldurclient.CoreStatesERRED {
+			return true
 		}
 	}
-
-	return ctrl.Result{}, nil
+	return false
 }
 
 func anyTenantPending(tenants map[string]infrastructurev1beta1.OpenStackTenant) bool {
