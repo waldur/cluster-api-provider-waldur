@@ -21,41 +21,62 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
-// WaldurMachineSpec defines the desired state of WaldurMachine
+// WaldurMachineSpec defines the desired state of WaldurMachine.
 type WaldurMachineSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
+	// ProviderID is the identifier of the VM in the cloud provider, set after provisioning.
+	// Follows the format "waldur://<vm-uuid>". Required by the CAPI Machine controller.
+	// +optional
+	ProviderID *string `json:"providerID,omitempty"`
 
-	// Target VM state
-	State *waldurclient.CoreStates `json:"state,omitempty"`
+	// OfferingSlug identifies which datacenter offering (OpenStack deployment) this
+	// machine should be provisioned in. Must match one of the offering slugs in the
+	// parent WaldurCluster's spec.datacenters.
+	OfferingSlug string `json:"offeringSlug"`
+
+	// NodeType classifies this machine as a worker or storage node.
+	NodeType NodeType `json:"nodeType"`
+
+	// Flavor is the OpenStack flavor name for this machine.
+	Flavor string `json:"flavor"`
+
+	// DataDiskSize is the size in GB of the data disk. Applicable to worker nodes.
+	// +kubebuilder:validation:Minimum=10
+	// +optional
+	DataDiskSize *int `json:"dataDiskSize,omitempty"`
+
+	// VsanDiskSize is the size in GB of the vSAN disk. Required for storage nodes.
+	// +kubebuilder:validation:Minimum=100
+	// +optional
+	VsanDiskSize *int `json:"vsanDiskSize,omitempty"`
 }
 
 // WaldurMachineStatus defines the observed state of WaldurMachine.
 type WaldurMachineStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// For Kubernetes API conventions, see:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
-
 	// conditions represent the current state of the WaldurMachine resource.
-	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
-	//
-	// Standard condition types include:
-	// - "Available": the resource is fully functional
-	// - "Progressing": the resource is being created or updated
-	// - "Degraded": the resource failed to reach or maintain its desired state
-	//
-	// The status of each condition is one of True, False, or Unknown.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// Initialization provides information about machine provisioning completion.
+	// Required by the CAPI v1beta2 contract.
+	// +optional
+	Initialization *WaldurMachineInitialization `json:"initialization,omitempty"`
+
+	// VmUuid is the UUID of the VM in Waldur/OpenStack, set after provisioning.
+	// +optional
+	VmUuid *string `json:"vmUuid,omitempty"`
+
+	// State is the current Waldur resource lifecycle state of the VM.
+	// +optional
+	State waldurclient.CoreStates `json:"state,omitempty"`
+}
+
+// WaldurMachineInitialization holds provisioning completion state for the CAPI v1beta2 contract.
+type WaldurMachineInitialization struct {
+	// Provisioned indicates the machine infrastructure has been provisioned.
+	// +optional
+	Provisioned *bool `json:"provisioned,omitempty"`
 }
 
 // +kubebuilder:object:root=true

@@ -22,43 +22,115 @@ import (
 	waldurclient "github.com/waldur/go-client"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+// ClusterTopology defines the datacenter distribution strategy.
+// +kubebuilder:validation:Enum=single;multi
+type ClusterTopology string
 
-// WaldurClusterSpec defines the desired state of WaldurCluster
+const (
+	// SingleDatacenter concentrates all resources in one datacenter.
+	SingleDatacenter ClusterTopology = "single"
+	// MultiDatacenter distributes resources across three datacenters for high availability.
+	MultiDatacenter ClusterTopology = "multi"
+)
+
+// NodeType classifies a node group by its workload role.
+// +kubebuilder:validation:Enum=worker;storage
+type NodeType string
+
+const (
+	// WorkerNode runs application workloads.
+	WorkerNode NodeType = "worker"
+	// StorageNode provides persistent volume capabilities via Longhorn vSAN.
+	StorageNode NodeType = "storage"
+)
+
+// WaldurClusterSpec defines the desired state of WaldurCluster.
 type WaldurClusterSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
-
-	// Organization slug for project creation
+	// Organization slug for Waldur project creation.
+	// +optional
 	Organization *string `json:"org,omitempty"`
 
-	// Slug of project containing tenants
+	// Project slug identifying the Waldur project containing the tenants.
+	// +optional
 	Project *string `json:"project,omitempty"`
 
-	// List of slugs for tenant offerings
-	Offerings []string `json:"offerings,omitempty"`
+	// KubernetesVersion is the target Kubernetes version in semver format (e.g. v1.29.0).
+	// +kubebuilder:validation:Pattern=`^v\d+\.\d+\.\d+$`
+	KubernetesVersion string `json:"kubernetesVersion"`
+
+	// Topology defines whether resources are concentrated in a single datacenter
+	// or distributed across three datacenters for high availability.
+	Topology ClusterTopology `json:"topology"`
+
+	// Datacenters defines per-datacenter configuration. Each entry maps to one
+	// Waldur offering (OpenStack deployment). Single topology requires exactly 1;
+	// multi topology requires exactly 3.
+	// +kubebuilder:validation:MinItems=1
+	Datacenters []DatacenterSpec `json:"datacenters"`
+
+	// SecurityRules defines CIDR-based network ingress/egress policies applied to all tenants.
+	// +optional
+	SecurityRules []SecurityRule `json:"securityRules,omitempty"`
+}
+
+// DatacenterSpec defines the configuration for a single datacenter (Waldur offering).
+type DatacenterSpec struct {
+	// OfferingSlug is the Waldur marketplace offering slug identifying this datacenter.
+	OfferingSlug string `json:"offeringSlug"`
+
+	// NodeGroups defines the groups of nodes to provision in this datacenter.
+	// +kubebuilder:validation:MinItems=1
+	NodeGroups []NodeGroupSpec `json:"nodeGroups"`
+}
+
+// NodeGroupSpec defines a homogeneous group of nodes within a datacenter.
+type NodeGroupSpec struct {
+	// Type classifies the node group as worker or storage.
+	Type NodeType `json:"type"`
+
+	// Flavor is the OpenStack flavor name for nodes in this group.
+	Flavor string `json:"flavor"`
+
+	// Count is the number of nodes to provision.
+	// +kubebuilder:validation:Minimum=1
+	Count int `json:"count"`
+
+	// DataDiskSize is the size in GB of the data disk attached to each worker node.
+	// Minimum 10 GB. Applicable to worker nodes.
+	// +kubebuilder:validation:Minimum=10
+	// +optional
+	DataDiskSize *int `json:"dataDiskSize,omitempty"`
+
+	// VsanDiskSize is the size in GB of the vSAN disk attached to each storage node.
+	// Minimum 100 GB. Required for storage nodes (Longhorn).
+	// +kubebuilder:validation:Minimum=100
+	// +optional
+	VsanDiskSize *int `json:"vsanDiskSize,omitempty"`
+}
+
+// SecurityRule defines a CIDR-based network access policy.
+type SecurityRule struct {
+	// Direction specifies whether this rule applies to incoming or outgoing traffic.
+	// +kubebuilder:validation:Enum=ingress;egress
+	Direction string `json:"direction"`
+
+	// CIDR is the IPv4 address range in CIDR notation.
+	// +kubebuilder:validation:Pattern=`^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$`
+	CIDR string `json:"cidr"`
+
+	// Port is the target port or port range (e.g. "443" or "8000-9000").
+	// +optional
+	Port *string `json:"port,omitempty"`
+
+	// Protocol is the network protocol.
+	// +kubebuilder:validation:Enum=tcp;udp;icmp
+	// +optional
+	Protocol *string `json:"protocol,omitempty"`
 }
 
 // WaldurClusterStatus defines the observed state of WaldurCluster.
 type WaldurClusterStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// For Kubernetes API conventions, see:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
-
 	// conditions represent the current state of the WaldurCluster resource.
-	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
-	//
-	// Standard condition types include:
-	// - "Available": the resource is fully functional
-	// - "Progressing": the resource is being created or updated
-	// - "Degraded": the resource failed to reach or maintain its desired state
-	//
-	// The status of each condition is one of True, False, or Unknown.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -70,10 +142,12 @@ type WaldurClusterStatus struct {
 	// +optional
 	Initialization *WaldurClusterInitialization `json:"initialization,omitempty"`
 
-	// List of created tenants
+	// Tenants tracks the OpenStack tenant provisioned per offering slug.
+	// +optional
 	Tenants map[string]OpenStackTenant `json:"tenants,omitempty"`
 }
 
+// WaldurClusterInitialization holds provisioning completion state for the CAPI v1beta2 contract.
 type WaldurClusterInitialization struct {
 	// Provisioned indicates the infrastructure has been provisioned.
 	// +optional
@@ -110,6 +184,7 @@ type WaldurClusterList struct {
 	Items           []WaldurCluster `json:"items"`
 }
 
+// WaldurOrder tracks a Waldur marketplace order.
 type WaldurOrder struct {
 	Uuid                    string                    `json:"uuid,omitempty"`
 	Type                    waldurclient.RequestTypes `json:"type,omitempty"`
@@ -118,11 +193,12 @@ type WaldurOrder struct {
 	ResourceUuid            *string                   `json:"resource_uuid,omitempty"`
 }
 
+// OpenStackTenant tracks the OpenStack tenant provisioned for one offering.
 type OpenStackTenant struct {
 	State waldurclient.CoreStates `json:"state,omitempty"`
 	Uuid  *string                 `json:"uuid,omitempty"`
 	Name  string                  `json:"name,omitempty"`
-	// The currently executing order
+	// Order is the currently executing or most recent Waldur order for this tenant.
 	Order *WaldurOrder `json:"order,omitempty"`
 }
 

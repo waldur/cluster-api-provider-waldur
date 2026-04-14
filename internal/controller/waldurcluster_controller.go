@@ -352,13 +352,12 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
-	tenantOfferings := waldurCluster.Spec.Offerings
-
 	if waldurCluster.Status.Tenants == nil {
-		waldurCluster.Status.Tenants = make(map[string]infrastructurev1beta2.OpenStackTenant, len(waldurCluster.Spec.Offerings))
+		waldurCluster.Status.Tenants = make(map[string]infrastructurev1beta2.OpenStackTenant, len(waldurCluster.Spec.Datacenters))
 	}
 
-	for _, offeringSlug := range tenantOfferings {
+	for _, dc := range waldurCluster.Spec.Datacenters {
+		offeringSlug := dc.OfferingSlug
 		if existing, ok := waldurCluster.Status.Tenants[offeringSlug]; ok {
 			err = r.refreshTenant(ctx, &existing)
 			if err != nil {

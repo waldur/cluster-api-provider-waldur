@@ -41,32 +41,130 @@ spec:
           spec:
             description: spec defines the desired state of WaldurCluster
             properties:
-              offerings:
-                description: List of slugs for tenant offerings
+              datacenters:
+                description: |-
+                  Datacenters defines per-datacenter configuration. Each entry maps to one
+                  Waldur offering (OpenStack deployment). Single topology requires exactly 1;
+                  multi topology requires exactly 3.
                 items:
-                  type: string
+                  description: DatacenterSpec defines the configuration for a single
+                    datacenter (Waldur offering).
+                  properties:
+                    nodeGroups:
+                      description: NodeGroups defines the groups of nodes to provision
+                        in this datacenter.
+                      items:
+                        description: NodeGroupSpec defines a homogeneous group of
+                          nodes within a datacenter.
+                        properties:
+                          count:
+                            description: Count is the number of nodes to provision.
+                            minimum: 1
+                            type: integer
+                          dataDiskSize:
+                            description: |-
+                              DataDiskSize is the size in GB of the data disk attached to each worker node.
+                              Minimum 10 GB. Applicable to worker nodes.
+                            minimum: 10
+                            type: integer
+                          flavor:
+                            description: Flavor is the OpenStack flavor name for nodes
+                              in this group.
+                            type: string
+                          type:
+                            description: Type classifies the node group as worker
+                              or storage.
+                            enum:
+                            - worker
+                            - storage
+                            type: string
+                          vsanDiskSize:
+                            description: |-
+                              VsanDiskSize is the size in GB of the vSAN disk attached to each storage node.
+                              Minimum 100 GB. Required for storage nodes (Longhorn).
+                            minimum: 100
+                            type: integer
+                        required:
+                        - count
+                        - flavor
+                        - type
+                        type: object
+                      minItems: 1
+                      type: array
+                    offeringSlug:
+                      description: OfferingSlug is the Waldur marketplace offering
+                        slug identifying this datacenter.
+                      type: string
+                  required:
+                  - nodeGroups
+                  - offeringSlug
+                  type: object
+                minItems: 1
                 type: array
+              kubernetesVersion:
+                description: KubernetesVersion is the target Kubernetes version in
+                  semver format (e.g. v1.29.0).
+                pattern: ^v\d+\.\d+\.\d+$
+                type: string
               org:
-                description: Organization slug for project creation
+                description: Organization slug for Waldur project creation.
                 type: string
               project:
-                description: Slug of project containing tenants
+                description: Project slug identifying the Waldur project containing
+                  the tenants.
                 type: string
+              securityRules:
+                description: SecurityRules defines CIDR-based network ingress/egress
+                  policies applied to all tenants.
+                items:
+                  description: SecurityRule defines a CIDR-based network access policy.
+                  properties:
+                    cidr:
+                      description: CIDR is the IPv4 address range in CIDR notation.
+                      pattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
+                      type: string
+                    direction:
+                      description: Direction specifies whether this rule applies to
+                        incoming or outgoing traffic.
+                      enum:
+                      - ingress
+                      - egress
+                      type: string
+                    port:
+                      description: Port is the target port or port range (e.g. "443"
+                        or "8000-9000").
+                      type: string
+                    protocol:
+                      description: Protocol is the network protocol.
+                      enum:
+                      - tcp
+                      - udp
+                      - icmp
+                      type: string
+                  required:
+                  - cidr
+                  - direction
+                  type: object
+                type: array
+              topology:
+                description: |-
+                  Topology defines whether resources are concentrated in a single datacenter
+                  or distributed across three datacenters for high availability.
+                enum:
+                - single
+                - multi
+                type: string
+            required:
+            - datacenters
+            - kubernetesVersion
+            - topology
             type: object
           status:
             description: status defines the observed state of WaldurCluster
             properties:
               conditions:
-                description: |-
-                  conditions represent the current state of the WaldurCluster resource.
-                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
-
-                  Standard condition types include:
-                  - "Available": the resource is fully functional
-                  - "Progressing": the resource is being created or updated
-                  - "Degraded": the resource failed to reach or maintain its desired state
-
-                  The status of each condition is one of True, False, or Unknown.
+                description: conditions represent the current state of the WaldurCluster
+                  resource.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -138,11 +236,14 @@ spec:
                 type: object
               tenants:
                 additionalProperties:
+                  description: OpenStackTenant tracks the OpenStack tenant provisioned
+                    for one offering.
                   properties:
                     name:
                       type: string
                     order:
-                      description: The currently executing order
+                      description: Order is the currently executing or most recent
+                        Waldur order for this tenant.
                       properties:
                         marketplace_resource_uuid:
                           type: string
@@ -163,7 +264,8 @@ spec:
                     uuid:
                       type: string
                   type: object
-                description: List of created tenants
+                description: Tenants tracks the OpenStack tenant provisioned per offering
+                  slug.
                 type: object
             type: object
         required:

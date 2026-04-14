@@ -41,24 +41,48 @@ spec:
           spec:
             description: spec defines the desired state of WaldurMachine
             properties:
-              state:
-                description: Target VM state
+              dataDiskSize:
+                description: DataDiskSize is the size in GB of the data disk. Applicable
+                  to worker nodes.
+                minimum: 10
+                type: integer
+              flavor:
+                description: Flavor is the OpenStack flavor name for this machine.
                 type: string
+              nodeType:
+                description: NodeType classifies this machine as a worker or storage
+                  node.
+                enum:
+                - worker
+                - storage
+                type: string
+              offeringSlug:
+                description: |-
+                  OfferingSlug identifies which datacenter offering (OpenStack deployment) this
+                  machine should be provisioned in. Must match one of the offering slugs in the
+                  parent WaldurCluster's spec.datacenters.
+                type: string
+              providerID:
+                description: |-
+                  ProviderID is the identifier of the VM in the cloud provider, set after provisioning.
+                  Follows the format "waldur://<vm-uuid>". Required by the CAPI Machine controller.
+                type: string
+              vsanDiskSize:
+                description: VsanDiskSize is the size in GB of the vSAN disk. Required
+                  for storage nodes.
+                minimum: 100
+                type: integer
+            required:
+            - flavor
+            - nodeType
+            - offeringSlug
             type: object
           status:
             description: status defines the observed state of WaldurMachine
             properties:
               conditions:
-                description: |-
-                  conditions represent the current state of the WaldurMachine resource.
-                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
-
-                  Standard condition types include:
-                  - "Available": the resource is fully functional
-                  - "Progressing": the resource is being created or updated
-                  - "Degraded": the resource failed to reach or maintain its desired state
-
-                  The status of each condition is one of True, False, or Unknown.
+                description: conditions represent the current state of the WaldurMachine
+                  resource.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -117,6 +141,24 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              initialization:
+                description: |-
+                  Initialization provides information about machine provisioning completion.
+                  Required by the CAPI v1beta2 contract.
+                properties:
+                  provisioned:
+                    description: Provisioned indicates the machine infrastructure
+                      has been provisioned.
+                    type: boolean
+                type: object
+              state:
+                description: State is the current Waldur resource lifecycle state
+                  of the VM.
+                type: string
+              vmUuid:
+                description: VmUuid is the UUID of the VM in Waldur/OpenStack, set
+                  after provisioning.
+                type: string
             type: object
         required:
         - spec
