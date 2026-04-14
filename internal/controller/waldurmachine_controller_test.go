@@ -27,7 +27,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	infrastructurev1beta1 "github.com/sergei-zaiaev/cluster-api-provider-waldur/api/v1beta1"
+	infrastructurev1beta2 "github.com/sergei-zaiaev/cluster-api-provider-waldur/api/v1beta2"
 )
 
 var _ = Describe("WaldurMachine Controller", func() {
@@ -40,13 +40,13 @@ var _ = Describe("WaldurMachine Controller", func() {
 			Name:      resourceName,
 			Namespace: "default", // TODO(user):Modify as needed
 		}
-		waldurmachine := &infrastructurev1beta1.WaldurMachine{}
+		waldurmachine := &infrastructurev1beta2.WaldurMachine{}
 
 		BeforeEach(func() {
 			By("creating the custom resource for the Kind WaldurMachine")
 			err := k8sClient.Get(ctx, typeNamespacedName, waldurmachine)
 			if err != nil && errors.IsNotFound(err) {
-				resource := &infrastructurev1beta1.WaldurMachine{
+				resource := &infrastructurev1beta2.WaldurMachine{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
 						Namespace: "default",
@@ -59,7 +59,7 @@ var _ = Describe("WaldurMachine Controller", func() {
 
 		AfterEach(func() {
 			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &infrastructurev1beta1.WaldurMachine{}
+			resource := &infrastructurev1beta2.WaldurMachine{}
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
 			Expect(err).NotTo(HaveOccurred())
 

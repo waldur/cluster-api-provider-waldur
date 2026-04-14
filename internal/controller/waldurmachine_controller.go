@@ -24,7 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	infrastructurev1beta1 "github.com/sergei-zaiaev/cluster-api-provider-waldur/api/v1beta1"
+	infrastructurev1beta2 "github.com/sergei-zaiaev/cluster-api-provider-waldur/api/v1beta2"
 )
 
 // WaldurMachineReconciler reconciles a WaldurMachine object
@@ -57,7 +57,7 @@ func (r *WaldurMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 // SetupWithManager sets up the controller with the Manager.
 func (r *WaldurMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&infrastructurev1beta1.WaldurMachine{}).
+		For(&infrastructurev1beta2.WaldurMachine{}).
 		Named("waldurmachine").
 		Complete(r)
 }

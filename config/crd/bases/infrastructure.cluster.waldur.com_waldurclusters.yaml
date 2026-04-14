@@ -16,7 +16,7 @@ spec:
     singular: waldurcluster
   scope: Namespaced
   versions:
-  - name: v1beta1
+  - name: v1beta2
     schema:
       openAPIV3Schema:
         description: WaldurCluster is the Schema for the waldurclusters API
@@ -141,15 +141,15 @@ spec:
                   properties:
                     name:
                       type: string
-                    orders:
+                    order:
                       description: The currently executing order
                       properties:
+                        marketplace_resource_uuid:
+                          type: string
                         resource_uuid:
                           type: string
                         state:
                           description: OrderState defines model for OrderState.
-                          type: string
-                        tenant_uuid:
                           type: string
                         type:
                           description: RequestTypes defines model for RequestTypes.
@@ -157,10 +157,10 @@ spec:
                         uuid:
                           type: string
                       type: object
-                    resource_uuid:
-                      type: string
                     state:
                       description: CoreStates defines model for CoreStates.
+                      type: string
+                    uuid:
                       type: string
                   type: object
                 description: List of created tenants

@@ -1,4 +1,4 @@
-apiVersion: infrastructure.cluster.waldur.com/v1beta1
+apiVersion: infrastructure.cluster.waldur.com/v1beta2
 kind: WaldurMachine
 metadata:
   labels:

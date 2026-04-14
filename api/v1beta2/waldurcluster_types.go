@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1beta1
+package v1beta2
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -114,16 +114,16 @@ type WaldurOrder struct {
 	Uuid                    string                    `json:"uuid,omitempty"`
 	Type                    waldurclient.RequestTypes `json:"type,omitempty"`
 	State                   waldurclient.OrderState   `json:"state,omitempty"`
-	MarketplaceResourceUuid string                    `json:"resource_uuid,omitempty"`
-	ResourceUuid            *string                   `json:"tenant_uuid,omitempty"`
+	MarketplaceResourceUuid string                    `json:"marketplace_resource_uuid,omitempty"`
+	ResourceUuid            *string                   `json:"resource_uuid,omitempty"`
 }
 
 type OpenStackTenant struct {
 	State waldurclient.CoreStates `json:"state,omitempty"`
-	Uuid  *string                 `json:"resource_uuid,omitempty"`
+	Uuid  *string                 `json:"uuid,omitempty"`
 	Name  string                  `json:"name,omitempty"`
 	// The currently executing order
-	Order *WaldurOrder `json:"orders,omitempty"`
+	Order *WaldurOrder `json:"order,omitempty"`
 }
 
 func init() {
