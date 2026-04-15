@@ -388,46 +388,56 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
+	org, err := r.getCustomer(ctx, *waldurCluster.Spec.Organization)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	project, err := r.getOrCreateProject(ctx, org, *waldurCluster.Spec.Project)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
 	base := waldurCluster.DeepCopy()
 
-	orgSlug := waldurCluster.Spec.Organization
-	org, err := r.getCustomer(ctx, *orgSlug)
-
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
-	projectSlug := waldurCluster.Spec.Project
-	project, err := r.getOrCreateProject(ctx, org, *projectSlug)
-
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
-	if waldurCluster.Status.Tenants == nil {
-		waldurCluster.Status.Tenants = make(map[string]infrastructurev1beta2.OpenStackTenant, len(waldurCluster.Spec.Datacenters))
+	tenants := make(map[string]infrastructurev1beta2.OpenStackTenant, len(waldurCluster.Status.Tenants))
+	for k, v := range waldurCluster.Status.Tenants {
+		tenants[k] = *v.DeepCopy()
 	}
 
 	for _, dc := range waldurCluster.Spec.Datacenters {
-		offeringSlug := dc.OfferingSlug
-		if existing, ok := waldurCluster.Status.Tenants[offeringSlug]; ok {
-			err = r.refreshTenant(ctx, &existing)
-			if err != nil {
-				log.Error(err, "Unable to refresh tenant", "uuid", existing.Uuid)
+		if existing, ok := tenants[dc.OfferingSlug]; ok {
+			if err := r.refreshTenant(ctx, &existing); err != nil {
+				log.Error(err, "Unable to refresh tenant", "offering", dc.OfferingSlug)
 			}
-			waldurCluster.Status.Tenants[offeringSlug] = existing
+			tenants[dc.OfferingSlug] = existing
 			continue
 		}
 
 		tenant, err := r.createTenant(ctx, dc, project)
 		if err != nil {
-			log.Error(err, "Unable to create tenant", "offering", offeringSlug)
+			log.Error(err, "Unable to create tenant", "offering", dc.OfferingSlug)
 			continue
 		}
-		waldurCluster.Status.Tenants[offeringSlug] = *tenant
+		tenants[dc.OfferingSlug] = *tenant
 	}
 
-	if anyTenantPending(waldurCluster.Status.Tenants) {
+	waldurCluster.Status.Tenants = tenants
+	r.setReadyCondition(&waldurCluster)
+
+	if err := r.Status().Patch(ctx, &waldurCluster, client.MergeFrom(base)); err != nil {
+		return ctrl.Result{}, errors.Wrapf(err, "couldn't patch status for cluster %q", waldurCluster.Name)
+	}
+
+	if anyTenantPending(tenants) {
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+	}
+	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+}
+
+func (r *WaldurClusterReconciler) setReadyCondition(waldurCluster *infrastructurev1beta2.WaldurCluster) {
+	switch {
+	case anyTenantPending(waldurCluster.Status.Tenants):
 		meta.SetStatusCondition(&waldurCluster.Status.Conditions, metav1.Condition{
 			Type:    "Ready",
 			Status:  metav1.ConditionFalse,
@@ -435,7 +445,7 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			Message: "Waiting for tenants to be provisioned",
 		})
 		waldurCluster.Status.Initialization = &infrastructurev1beta2.WaldurClusterInitialization{Provisioned: ptr.To(false)}
-	} else if anyTenantErred(waldurCluster.Status.Tenants) {
+	case anyTenantErred(waldurCluster.Status.Tenants):
 		meta.SetStatusCondition(&waldurCluster.Status.Conditions, metav1.Condition{
 			Type:    "Ready",
 			Status:  metav1.ConditionFalse,
@@ -443,7 +453,7 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			Message: "One or more tenants failed to provision",
 		})
 		waldurCluster.Status.Initialization = &infrastructurev1beta2.WaldurClusterInitialization{Provisioned: ptr.To(false)}
-	} else {
+	default:
 		meta.SetStatusCondition(&waldurCluster.Status.Conditions, metav1.Condition{
 			Type:    "Ready",
 			Status:  metav1.ConditionTrue,
@@ -452,16 +462,6 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		})
 		waldurCluster.Status.Initialization = &infrastructurev1beta2.WaldurClusterInitialization{Provisioned: ptr.To(true)}
 	}
-
-	if err := r.Status().Patch(ctx, &waldurCluster, client.MergeFrom(base)); err != nil {
-		return ctrl.Result{}, errors.Wrapf(err, "couldn't patch status for cluster %q", waldurCluster.Name)
-	}
-
-	if anyTenantPending(waldurCluster.Status.Tenants) {
-		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
-	}
-
-	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 
 func anyTenantErred(tenants map[string]infrastructurev1beta2.OpenStackTenant) bool {
