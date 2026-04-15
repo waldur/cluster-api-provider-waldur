@@ -39,7 +39,6 @@ import (
 
 	util "sigs.k8s.io/cluster-api/util"
 
-	uuid "github.com/google/uuid"
 	openapitypes "github.com/oapi-codegen/runtime/types"
 )
 
@@ -102,7 +101,7 @@ func (r *WaldurClusterReconciler) calculateLimits(ctx context.Context, offering 
 	storage := (3 + 1) * systemDiskMB // controller + lb system disks
 
 	for _, ng := range dc.NodeGroups {
-		flavor, err := r.getFlavor(ctx, offering, ng.Flavor)
+		flavor, err := getFlavor(ctx, r.Waldur, offering, ng.Flavor)
 		if err != nil {
 			return nil, errors.Wrapf(err, "unable to get flavor %q", ng.Flavor)
 		}
@@ -124,20 +123,6 @@ func (r *WaldurClusterReconciler) calculateLimits(ctx context.Context, offering 
 	}, nil
 }
 
-func (r *WaldurClusterReconciler) getFlavor(ctx context.Context, offering *waldurclient.PublicOfferingDetails, flavorName string) (*waldurclient.OpenStackFlavor, error) {
-	resp, err := r.Waldur.OpenstackFlavorsListWithResponse(ctx, &waldurclient.OpenstackFlavorsListParams{
-		OfferingUuid: offering.Uuid,
-		NameExact:    &flavorName,
-	})
-	if err != nil {
-		return nil, err
-	}
-	flavors := *resp.JSON200
-	if len(flavors) == 0 {
-		return nil, errors.Errorf("flavor %q not found in offering %s", flavorName, *offering.Slug)
-	}
-	return &flavors[0], nil
-}
 
 func (r *WaldurClusterReconciler) submitTenantCreationOrder(ctx context.Context, offering *waldurclient.PublicOfferingDetails, project *waldurclient.Project, dc infrastructurev1beta2.DatacenterSpec) (*waldurclient.OrderDetails, error) {
 	orderType := waldurclient.Create
@@ -192,7 +177,7 @@ func (r *WaldurClusterReconciler) refreshTenant(ctx context.Context, existing *i
 
 	if existing.Order != nil && !isOrderTerminal(existing.Order.State) {
 		prevOrderState := existing.Order.State
-		if err := r.refreshOrder(ctx, existing.Order); err != nil {
+		if err := refreshOrder(ctx, r.Waldur, existing.Order); err != nil {
 			return errors.Wrap(err, "unable to refresh order")
 		}
 		if existing.Order.State != prevOrderState {
@@ -210,7 +195,7 @@ func (r *WaldurClusterReconciler) refreshTenant(ctx context.Context, existing *i
 		return nil
 	}
 
-	resource, err := r.getMarketplaceResource(ctx, existing.MarketplaceResourceUuid)
+	resource, err := getMarketplaceResource(ctx, r.Waldur, existing.MarketplaceResourceUuid)
 	if err != nil {
 		return err
 	}
@@ -250,34 +235,6 @@ func (r *WaldurClusterReconciler) refreshTenant(ctx context.Context, existing *i
 	return nil
 }
 
-func isOrderTerminal(state waldurclient.OrderState) bool {
-	return state == waldurclient.OrderStateDone ||
-		state == waldurclient.OrderStateErred ||
-		state == waldurclient.OrderStateCanceled
-}
-
-func (r *WaldurClusterReconciler) refreshOrder(ctx context.Context, existingOrder *infrastructurev1beta2.WaldurOrder) error {
-	orderUuid, err := uuid.Parse(existingOrder.Uuid)
-	if err != nil {
-		return err
-	}
-
-	orderResponse, err := r.Waldur.MarketplaceOrdersRetrieveWithResponse(ctx, orderUuid, &waldurclient.MarketplaceOrdersRetrieveParams{})
-	if err != nil {
-		return err
-	}
-
-	order := orderResponse.JSON200
-
-	existingOrder.State = *order.State
-
-	if order.ResourceUuid != nil {
-		tenantUuid := order.ResourceUuid.String()
-		existingOrder.ResourceUuid = &tenantUuid
-	}
-
-	return nil
-}
 
 func (r *WaldurClusterReconciler) createTenant(ctx context.Context, dc infrastructurev1beta2.DatacenterSpec) (*infrastructurev1beta2.OpenStackTenant, error) {
 	org, err := r.getCustomer(ctx, dc.OpenstackInfrastructure.CustomerName)
@@ -290,7 +247,7 @@ func (r *WaldurClusterReconciler) createTenant(ctx context.Context, dc infrastru
 		return nil, errors.Wrap(err, "unable to get or create project")
 	}
 
-	offering, err := r.getOffering(ctx, dc.OfferingSlug)
+	offering, err := getOffering(ctx, r.Waldur, dc.OfferingSlug)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to get offering details")
 	}
@@ -337,36 +294,6 @@ func (r *WaldurClusterReconciler) createTenant(ctx context.Context, dc infrastru
 	return openStackTenant, nil
 }
 
-func (r *WaldurClusterReconciler) getOffering(ctx context.Context, offeringSlug string) (*waldurclient.PublicOfferingDetails, error) {
-	offeringParams := &waldurclient.MarketplacePublicOfferingsListParams{
-		Slug: &offeringSlug,
-	}
-	offeringResponse, err := r.Waldur.MarketplacePublicOfferingsListWithResponse(ctx, offeringParams)
-	if err != nil {
-		return nil, err
-	}
-
-	offerings := *offeringResponse.JSON200
-	if len(offerings) == 0 {
-		return nil, errors.Errorf("unable to find an offering with slug %s", offeringSlug)
-	}
-
-	return &offerings[0], nil
-}
-
-func (r *WaldurClusterReconciler) getMarketplaceResource(ctx context.Context, marketplaceResourceUuid string) (*waldurclient.Resource, error) {
-	resourceUuid, err := uuid.Parse(marketplaceResourceUuid)
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to parse marketplace resource UUID")
-	}
-
-	resp, err := r.Waldur.MarketplaceResourcesRetrieveWithResponse(ctx, resourceUuid, &waldurclient.MarketplaceResourcesRetrieveParams{})
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to retrieve marketplace resource")
-	}
-
-	return resp.JSON200, nil
-}
 
 func (r *WaldurClusterReconciler) getOpenStackTenant(ctx context.Context, tenantUuid *openapitypes.UUID) (*waldurclient.OpenStackTenant, error) {
 	tenantResponse, err := r.Waldur.OpenstackTenantsRetrieveWithResponse(ctx, *tenantUuid, &waldurclient.OpenstackTenantsRetrieveParams{})
@@ -408,32 +335,6 @@ func (r *WaldurClusterReconciler) getCustomer(ctx context.Context, orgName strin
 	return &orgs[0], nil
 }
 
-func (r *WaldurClusterReconciler) submitTenantTerminationOrder(ctx context.Context, tenant *infrastructurev1beta2.OpenStackTenant) (*infrastructurev1beta2.WaldurOrder, error) {
-	marketplaceResourceUuid, err := uuid.Parse(tenant.MarketplaceResourceUuid)
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to parse marketplace resource UUID")
-	}
-
-	resp, err := r.Waldur.MarketplaceResourcesTerminateWithResponse(ctx, marketplaceResourceUuid, waldurclient.ResourceTerminateRequest{})
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode() != 200 && resp.StatusCode() != 202 {
-		return nil, errors.Errorf("unable to submit termination order, status %d: %s", resp.StatusCode(), string(resp.Body))
-	}
-
-	if resp.JSON200 == nil || resp.JSON200.OrderUuid == nil {
-		return nil, errors.New("termination order response missing order UUID")
-	}
-
-	return &infrastructurev1beta2.WaldurOrder{
-		Uuid:                    resp.JSON200.OrderUuid.String(),
-		Type:                    waldurclient.Terminate,
-		State:                   waldurclient.OrderStatePendingProvider,
-		MarketplaceResourceUuid: tenant.MarketplaceResourceUuid,
-	}, nil
-}
 
 func (r *WaldurClusterReconciler) deleteProject(ctx context.Context, projectSlug string) error {
 	projectResponse, err := r.Waldur.ProjectsListWithResponse(ctx, &waldurclient.ProjectsListParams{
@@ -498,7 +399,7 @@ func (r *WaldurClusterReconciler) reconcileDelete(ctx context.Context, waldurClu
 
 		// Submit the termination order
 		log.Info("Submitting tenant termination order", "offering", offeringSlug, "tenant", tenant.Name)
-		order, err := r.submitTenantTerminationOrder(ctx, &tenant)
+		order, err := submitTerminationOrder(ctx, r.Waldur, tenant.MarketplaceResourceUuid)
 		if err != nil {
 			log.Error(err, "Unable to submit termination order", "offering", offeringSlug)
 			tenants[offeringSlug] = tenant

@@ -39,6 +39,9 @@ type WaldurMachineSpec struct {
 	// Flavor is the OpenStack flavor name for this machine.
 	Flavor string `json:"flavor"`
 
+	// Image is the name or UUID of the OS image to use for this VM.
+	Image string `json:"image"`
+
 	// DataDiskSize is the size in GB of the data disk. Applicable to worker nodes.
 	// +kubebuilder:validation:Minimum=10
 	// +optional
@@ -70,6 +73,19 @@ type WaldurMachineStatus struct {
 	// State is the current Waldur resource lifecycle state of the VM.
 	// +optional
 	State waldurclient.CoreStates `json:"state,omitempty"`
+
+	// MarketplaceResourceUuid is the UUID of the marketplace resource backing this VM.
+	// Required to submit a termination order.
+	// +optional
+	MarketplaceResourceUuid string `json:"marketplaceResourceUuid,omitempty"`
+
+	// MarketplaceResourceState is the lifecycle state of the marketplace resource.
+	// +optional
+	MarketplaceResourceState waldurclient.ResourceState `json:"marketplaceResourceState,omitempty"`
+
+	// Order is the currently executing or most recent Waldur order for this VM.
+	// +optional
+	Order *WaldurOrder `json:"order,omitempty"`
 }
 
 // WaldurMachineInitialization holds provisioning completion state for the CAPI v1beta2 contract.

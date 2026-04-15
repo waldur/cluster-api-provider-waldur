@@ -232,6 +232,7 @@ func main() {
 	if err := (&controller.WaldurMachineReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
+		Waldur: *waldur,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "WaldurMachine")
 		os.Exit(1)
