@@ -49,8 +49,8 @@ type WaldurClusterReconciler struct {
 	Waldur waldurclient.ClientWithResponses
 }
 
-func (r *WaldurClusterReconciler) getOrCreateProject(ctx context.Context, org *waldurclient.Customer, projectSlug string) (*waldurclient.Project, error) {
-	projectName := fmt.Sprintf("%s_%s", *org.Slug, projectSlug)
+func (r *WaldurClusterReconciler) getOrCreateProject(ctx context.Context, org *waldurclient.Customer, dcName string) (*waldurclient.Project, error) {
+	projectName := fmt.Sprintf("%s_%s", *org.Slug, dcName)
 	customerUuids := []openapitypes.UUID{*org.Uuid}
 	projectResponse, err := r.Waldur.ProjectsListWithResponse(ctx, &waldurclient.ProjectsListParams{
 		NameExact: &projectName,
@@ -64,7 +64,6 @@ func (r *WaldurClusterReconciler) getOrCreateProject(ctx context.Context, org *w
 	projects := *projectResponse.JSON200
 
 	if len(projects) == 0 {
-		// create a project
 		projectData := waldurclient.ProjectsCreateJSONRequestBody{
 			Name:     projectName,
 			Customer: *org.Url,
@@ -79,7 +78,6 @@ func (r *WaldurClusterReconciler) getOrCreateProject(ctx context.Context, org *w
 	}
 
 	return &projects[0], nil
-
 }
 
 // controllerNodeCores and controllerNodeRam are the per-node resource defaults for
@@ -243,7 +241,17 @@ func (r *WaldurClusterReconciler) refreshOrder(ctx context.Context, existingOrde
 	return nil
 }
 
-func (r *WaldurClusterReconciler) createTenant(ctx context.Context, dc infrastructurev1beta2.DatacenterSpec, project *waldurclient.Project) (*infrastructurev1beta2.OpenStackTenant, error) {
+func (r *WaldurClusterReconciler) createTenant(ctx context.Context, dc infrastructurev1beta2.DatacenterSpec) (*infrastructurev1beta2.OpenStackTenant, error) {
+	org, err := r.getCustomer(ctx, dc.OpenstackInfrastructure.CustomerName)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to get customer")
+	}
+
+	project, err := r.getOrCreateProject(ctx, org, dc.Name)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to get or create project")
+	}
+
 	offering, err := r.getOffering(ctx, dc.OfferingSlug)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to get offering details")
@@ -263,8 +271,9 @@ func (r *WaldurClusterReconciler) createTenant(ctx context.Context, dc infrastru
 
 	tenantUuid := order.ResourceUuid
 	openStackTenant := &infrastructurev1beta2.OpenStackTenant{
-		Order: waldurOrder,
-		Name:  *order.ResourceName,
+		Order:       waldurOrder,
+		Name:        *order.ResourceName,
+		ProjectSlug: project.Slug,
 	}
 
 	if tenantUuid == nil {
@@ -312,15 +321,15 @@ func (r *WaldurClusterReconciler) getOpenStackTenant(ctx context.Context, tenant
 	return tenant, nil
 }
 
-func (r *WaldurClusterReconciler) getCustomer(ctx context.Context, orgSlug string) (*waldurclient.Customer, error) {
+func (r *WaldurClusterReconciler) getCustomer(ctx context.Context, orgName string) (*waldurclient.Customer, error) {
 	fieldFilter := []waldurclient.CustomerFieldEnum{
 		waldurclient.CustomerFieldEnumUrl,
 		waldurclient.CustomerFieldEnumSlug,
 		waldurclient.CustomerFieldEnumUuid,
 	}
 	params := waldurclient.CustomersListParams{
-		Slug:  &orgSlug,
-		Field: &fieldFilter,
+		NameExact: &orgName,
+		Field:     &fieldFilter,
 	}
 	orgResponse, err := r.Waldur.CustomersListWithResponse(ctx, &params)
 
@@ -329,13 +338,13 @@ func (r *WaldurClusterReconciler) getCustomer(ctx context.Context, orgSlug strin
 	}
 
 	if orgResponse.StatusCode() != 200 {
-		return nil, errors.Errorf("unable to get %s org, reason: %s", orgSlug, string(orgResponse.Body))
+		return nil, errors.Errorf("unable to get customer %q, reason: %s", orgName, string(orgResponse.Body))
 	}
 
 	orgs := *orgResponse.JSON200
 
 	if len(orgs) == 0 {
-		return nil, errors.Errorf("unable to find an org with slug %s", orgSlug)
+		return nil, errors.Errorf("unable to find a customer with name %q", orgName)
 	}
 
 	return &orgs[0], nil
@@ -380,16 +389,6 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
-	org, err := r.getCustomer(ctx, *waldurCluster.Spec.Organization)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
-	project, err := r.getOrCreateProject(ctx, org, *waldurCluster.Spec.Project)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
 	base := waldurCluster.DeepCopy()
 
 	tenants := make(map[string]infrastructurev1beta2.OpenStackTenant, len(waldurCluster.Status.Tenants))
@@ -406,7 +405,7 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			continue
 		}
 
-		tenant, err := r.createTenant(ctx, dc, project)
+		tenant, err := r.createTenant(ctx, dc)
 		if err != nil {
 			log.Error(err, "Unable to create tenant", "offering", dc.OfferingSlug)
 			continue
@@ -429,6 +428,14 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 func (r *WaldurClusterReconciler) setReadyCondition(waldurCluster *infrastructurev1beta2.WaldurCluster) {
 	switch {
+	case len(waldurCluster.Status.Tenants) < len(waldurCluster.Spec.Datacenters):
+		meta.SetStatusCondition(&waldurCluster.Status.Conditions, metav1.Condition{
+			Type:    "Ready",
+			Status:  metav1.ConditionFalse,
+			Reason:  "Provisioning",
+			Message: "Waiting for tenants to be created",
+		})
+		waldurCluster.Status.Initialization = &infrastructurev1beta2.WaldurClusterInitialization{Provisioned: ptr.To(false)}
 	case anyTenantPending(waldurCluster.Status.Tenants):
 		meta.SetStatusCondition(&waldurCluster.Status.Conditions, metav1.Condition{
 			Type:    "Ready",

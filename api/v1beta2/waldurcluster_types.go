@@ -46,14 +46,6 @@ const (
 
 // WaldurClusterSpec defines the desired state of WaldurCluster.
 type WaldurClusterSpec struct {
-	// Organization slug for Waldur project creation.
-	// +optional
-	Organization *string `json:"org,omitempty"`
-
-	// Project slug identifying the Waldur project containing the tenants.
-	// +optional
-	Project *string `json:"project,omitempty"`
-
 	// KubernetesVersion is the target Kubernetes version in semver format (e.g. v1.29.0).
 	// +kubebuilder:validation:Pattern=`^v\d+\.\d+\.\d+$`
 	KubernetesVersion string `json:"kubernetesVersion"`
@@ -78,9 +70,29 @@ type DatacenterSpec struct {
 	// OfferingSlug is the Waldur marketplace offering slug identifying this datacenter.
 	OfferingSlug string `json:"offeringSlug"`
 
+	// Name is a human-readable label for this datacenter, used as the Waldur project name.
+	Name string `json:"name"`
+
+	// OpenstackInfrastructure identifies the OpenStack tenant backing this datacenter.
+	OpenstackInfrastructure OpenstackInfrastructure `json:"openstackInfrastructure"`
+
 	// NodeGroups defines the groups of nodes to provision in this datacenter.
 	// +kubebuilder:validation:MinItems=1
 	NodeGroups []NodeGroupSpec `json:"nodeGroups"`
+}
+
+// OpenstackInfrastructure identifies the OpenStack tenant that backs a datacenter.
+type OpenstackInfrastructure struct {
+	// Name is the name of the OpenStack tenant.
+	Name string `json:"name"`
+
+	// CustomerName is the Waldur customer (organization) slug that owns the tenant.
+	CustomerName string `json:"customerName"`
+
+	// Uuid is the UUID of a pre-existing OpenStack tenant. When set, the controller
+	// uses this tenant directly instead of creating a new one.
+	// +optional
+	Uuid *string `json:"uuid,omitempty"`
 }
 
 // NodeGroupSpec defines a homogeneous group of nodes within a datacenter.
@@ -198,6 +210,9 @@ type OpenStackTenant struct {
 	State waldurclient.CoreStates `json:"state,omitempty"`
 	Uuid  *string                 `json:"uuid,omitempty"`
 	Name  string                  `json:"name,omitempty"`
+	// ProjectSlug is the slug of the Waldur project created for this datacenter.
+	// +optional
+	ProjectSlug *string `json:"projectSlug,omitempty"`
 	// Order is the currently executing or most recent Waldur order for this tenant.
 	Order *WaldurOrder `json:"order,omitempty"`
 }

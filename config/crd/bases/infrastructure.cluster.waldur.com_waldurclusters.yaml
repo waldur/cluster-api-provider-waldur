@@ -50,6 +50,10 @@ spec:
                   description: DatacenterSpec defines the configuration for a single
                     datacenter (Waldur offering).
                   properties:
+                    name:
+                      description: Name is a human-readable label for this datacenter,
+                        used as the Waldur project name.
+                      type: string
                     nodeGroups:
                       description: NodeGroups defines the groups of nodes to provision
                         in this datacenter.
@@ -95,9 +99,31 @@ spec:
                       description: OfferingSlug is the Waldur marketplace offering
                         slug identifying this datacenter.
                       type: string
+                    openstackInfrastructure:
+                      description: OpenstackInfrastructure identifies the OpenStack
+                        tenant backing this datacenter.
+                      properties:
+                        customerName:
+                          description: CustomerName is the Waldur customer (organization)
+                            slug that owns the tenant.
+                          type: string
+                        name:
+                          description: Name is the name of the OpenStack tenant.
+                          type: string
+                        uuid:
+                          description: |-
+                            Uuid is the UUID of a pre-existing OpenStack tenant. When set, the controller
+                            uses this tenant directly instead of creating a new one.
+                          type: string
+                      required:
+                      - customerName
+                      - name
+                      type: object
                   required:
+                  - name
                   - nodeGroups
                   - offeringSlug
+                  - openstackInfrastructure
                   type: object
                 minItems: 1
                 type: array
@@ -105,13 +131,6 @@ spec:
                 description: KubernetesVersion is the target Kubernetes version in
                   semver format (e.g. v1.29.0).
                 pattern: ^v\d+\.\d+\.\d+$
-                type: string
-              org:
-                description: Organization slug for Waldur project creation.
-                type: string
-              project:
-                description: Project slug identifying the Waldur project containing
-                  the tenants.
                 type: string
               securityRules:
                 description: SecurityRules defines CIDR-based network ingress/egress
@@ -258,6 +277,10 @@ spec:
                         uuid:
                           type: string
                       type: object
+                    projectSlug:
+                      description: ProjectSlug is the slug of the Waldur project created
+                        for this datacenter.
+                      type: string
                     state:
                       description: CoreStates defines model for CoreStates.
                       type: string
