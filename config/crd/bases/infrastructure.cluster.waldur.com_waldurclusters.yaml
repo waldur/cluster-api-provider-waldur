@@ -258,15 +258,20 @@ spec:
                   description: OpenStackTenant tracks the OpenStack tenant provisioned
                     for one offering.
                   properties:
+                    marketplaceResourceUuid:
+                      description: |-
+                        MarketplaceResourceUuid is the UUID of the marketplace resource backing this tenant.
+                        Required to submit a termination order.
+                      type: string
                     name:
                       type: string
                     order:
                       description: Order is the currently executing or most recent
                         Waldur order for this tenant.
                       properties:
-                        marketplace_resource_uuid:
+                        marketplaceResourceUuid:
                           type: string
-                        resource_uuid:
+                        resourceUuid:
                           type: string
                         state:
                           description: OrderState defines model for OrderState.

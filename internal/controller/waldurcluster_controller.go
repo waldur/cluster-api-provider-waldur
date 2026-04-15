@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/pkg/errors"
@@ -42,6 +43,8 @@ import (
 	openapitypes "github.com/oapi-codegen/runtime/types"
 )
 
+const finalizer = "waldurcluster.infrastructure.cluster.waldur.com/finalizer"
+
 // WaldurClusterReconciler reconciles a WaldurCluster object
 type WaldurClusterReconciler struct {
 	client.Client
@@ -50,6 +53,7 @@ type WaldurClusterReconciler struct {
 }
 
 func (r *WaldurClusterReconciler) getOrCreateProject(ctx context.Context, org *waldurclient.Customer, dcName string) (*waldurclient.Project, error) {
+	log := logf.FromContext(ctx)
 	projectName := fmt.Sprintf("%s_%s", *org.Slug, dcName)
 	customerUuids := []openapitypes.UUID{*org.Uuid}
 	projectResponse, err := r.Waldur.ProjectsListWithResponse(ctx, &waldurclient.ProjectsListParams{
@@ -64,6 +68,7 @@ func (r *WaldurClusterReconciler) getOrCreateProject(ctx context.Context, org *w
 	projects := *projectResponse.JSON200
 
 	if len(projects) == 0 {
+		log.Info("Creating Waldur project", "project", projectName)
 		projectData := waldurclient.ProjectsCreateJSONRequestBody{
 			Name:     projectName,
 			Customer: *org.Url,
@@ -74,6 +79,7 @@ func (r *WaldurClusterReconciler) getOrCreateProject(ctx context.Context, org *w
 			return nil, err
 		}
 
+		log.Info("Waldur project created", "project", projectName, "slug", ptr.Deref(projectCreateResponse.JSON201.Slug, ""))
 		return projectCreateResponse.JSON201, nil
 	}
 
@@ -182,9 +188,15 @@ func (r *WaldurClusterReconciler) submitTenantCreationOrder(ctx context.Context,
 }
 
 func (r *WaldurClusterReconciler) refreshTenant(ctx context.Context, existing *infrastructurev1beta2.OpenStackTenant) error {
+	log := logf.FromContext(ctx)
+
 	if existing.Order != nil && !isOrderTerminal(existing.Order.State) {
+		prevOrderState := existing.Order.State
 		if err := r.refreshOrder(ctx, existing.Order); err != nil {
 			return errors.Wrap(err, "unable to refresh order")
+		}
+		if existing.Order.State != prevOrderState {
+			log.Info("Tenant order state changed", "tenant", existing.Name, "order", existing.Order.Uuid, "state", existing.Order.State)
 		}
 	}
 
@@ -207,8 +219,17 @@ func (r *WaldurClusterReconciler) refreshTenant(ctx context.Context, existing *i
 		return err
 	}
 
+	prevState := existing.State
 	existing.State = *refreshed.State
 	existing.Name = *refreshed.Name
+	if refreshed.MarketplaceResourceState != nil {
+		existing.MarketplaceResourceState = waldurclient.ResourceState(*refreshed.MarketplaceResourceState)
+	}
+
+	if existing.State != prevState {
+		log.Info("Tenant state changed", "tenant", existing.Name, "state", existing.State, "marketplaceResourceState", existing.MarketplaceResourceState)
+	}
+
 	return nil
 }
 
@@ -257,10 +278,15 @@ func (r *WaldurClusterReconciler) createTenant(ctx context.Context, dc infrastru
 		return nil, errors.Wrap(err, "unable to get offering details")
 	}
 
+	log := logf.FromContext(ctx)
+	log.Info("Submitting tenant creation order", "offering", dc.OfferingSlug, "datacenter", dc.Name)
+
 	order, err := r.submitTenantCreationOrder(ctx, offering, project, dc)
 	if err != nil || order == nil {
 		return nil, errors.Wrap(err, "unable to submit order")
 	}
+
+	log.Info("Tenant creation order submitted", "offering", dc.OfferingSlug, "order", order.Uuid.String(), "state", order.State)
 
 	waldurOrder := &infrastructurev1beta2.WaldurOrder{
 		Uuid:                    order.Uuid.String(),
@@ -271,9 +297,10 @@ func (r *WaldurClusterReconciler) createTenant(ctx context.Context, dc infrastru
 
 	tenantUuid := order.ResourceUuid
 	openStackTenant := &infrastructurev1beta2.OpenStackTenant{
-		Order:       waldurOrder,
-		Name:        *order.ResourceName,
-		ProjectSlug: project.Slug,
+		Order:                   waldurOrder,
+		Name:                    *order.ResourceName,
+		ProjectSlug:             project.Slug,
+		MarketplaceResourceUuid: order.MarketplaceResourceUuid.String(),
 	}
 
 	if tenantUuid == nil {
@@ -350,6 +377,141 @@ func (r *WaldurClusterReconciler) getCustomer(ctx context.Context, orgName strin
 	return &orgs[0], nil
 }
 
+func (r *WaldurClusterReconciler) submitTenantTerminationOrder(ctx context.Context, tenant *infrastructurev1beta2.OpenStackTenant) (*infrastructurev1beta2.WaldurOrder, error) {
+	marketplaceResourceUuid, err := uuid.Parse(tenant.MarketplaceResourceUuid)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to parse marketplace resource UUID")
+	}
+
+	resp, err := r.Waldur.MarketplaceResourcesTerminateWithResponse(ctx, marketplaceResourceUuid, waldurclient.ResourceTerminateRequest{})
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode() != 200 && resp.StatusCode() != 202 {
+		return nil, errors.Errorf("unable to submit termination order, status %d: %s", resp.StatusCode(), string(resp.Body))
+	}
+
+	if resp.JSON200 == nil || resp.JSON200.OrderUuid == nil {
+		return nil, errors.New("termination order response missing order UUID")
+	}
+
+	return &infrastructurev1beta2.WaldurOrder{
+		Uuid:                    resp.JSON200.OrderUuid.String(),
+		Type:                    waldurclient.Terminate,
+		State:                   waldurclient.OrderStatePendingProvider,
+		MarketplaceResourceUuid: tenant.MarketplaceResourceUuid,
+	}, nil
+}
+
+func (r *WaldurClusterReconciler) deleteProject(ctx context.Context, projectSlug string) error {
+	projectResponse, err := r.Waldur.ProjectsListWithResponse(ctx, &waldurclient.ProjectsListParams{
+		Slug: &projectSlug,
+	})
+	if err != nil {
+		return err
+	}
+
+	projects := *projectResponse.JSON200
+	if len(projects) == 0 {
+		return nil // already gone
+	}
+
+	projectUuid := projects[0].Uuid
+	if projectUuid == nil {
+		return errors.Errorf("project %q has no UUID", projectSlug)
+	}
+
+	resp, err := r.Waldur.ProjectsDestroyWithResponse(ctx, *projectUuid)
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode() != 200 && resp.StatusCode() != 204 {
+		return errors.Errorf("unable to delete project %q, status %d: %s", projectSlug, resp.StatusCode(), string(resp.Body))
+	}
+
+	return nil
+}
+
+func (r *WaldurClusterReconciler) reconcileDelete(ctx context.Context, waldurCluster *infrastructurev1beta2.WaldurCluster) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	base := waldurCluster.DeepCopy()
+
+	tenants := make(map[string]infrastructurev1beta2.OpenStackTenant, len(waldurCluster.Status.Tenants))
+	for k, v := range waldurCluster.Status.Tenants {
+		tenants[k] = *v.DeepCopy()
+	}
+
+	allDone := true
+	for offeringSlug, tenant := range tenants {
+		// Nothing to clean up if the tenant was never actually provisioned
+		if tenant.MarketplaceResourceUuid == "" {
+			continue
+		}
+
+		// If there's an active termination order, refresh it and wait
+		if tenant.Order != nil && tenant.Order.Type == waldurclient.Terminate && !isOrderTerminal(tenant.Order.State) {
+			if err := r.refreshOrder(ctx, tenant.Order); err != nil {
+				log.Error(err, "Unable to refresh termination order", "offering", offeringSlug)
+			}
+			tenants[offeringSlug] = tenant
+			allDone = false
+			continue
+		}
+
+		// Tenant is fully terminated once its order is done
+		if tenant.Order != nil && tenant.Order.Type == waldurclient.Terminate && tenant.Order.State == waldurclient.OrderStateDone {
+			continue
+		}
+
+		// Submit the termination order
+		log.Info("Submitting tenant termination order", "offering", offeringSlug, "tenant", tenant.Name)
+		order, err := r.submitTenantTerminationOrder(ctx, &tenant)
+		if err != nil {
+			log.Error(err, "Unable to submit termination order", "offering", offeringSlug)
+			tenants[offeringSlug] = tenant
+			allDone = false
+			continue
+		}
+		log.Info("Tenant termination order submitted", "offering", offeringSlug, "tenant", tenant.Name, "order", order.Uuid)
+
+		tenant.Order = order
+		tenants[offeringSlug] = tenant
+		allDone = false
+	}
+
+	waldurCluster.Status.Tenants = tenants
+	if err := r.Status().Patch(ctx, waldurCluster, client.MergeFrom(base)); err != nil {
+		return ctrl.Result{}, errors.Wrapf(err, "couldn't patch status for cluster %q", waldurCluster.Name)
+	}
+
+	if !allDone {
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+	}
+
+	// All tenants terminated — delete the projects
+	for _, tenant := range tenants {
+		if tenant.ProjectSlug == nil {
+			continue
+		}
+		log.Info("Deleting Waldur project", "project", *tenant.ProjectSlug)
+		if err := r.deleteProject(ctx, *tenant.ProjectSlug); err != nil {
+			return ctrl.Result{}, errors.Wrapf(err, "unable to delete project %q", *tenant.ProjectSlug)
+		}
+		log.Info("Waldur project deleted", "project", *tenant.ProjectSlug)
+	}
+
+	// Remove the finalizer so the API server can delete the object
+	log.Info("All tenants terminated, removing finalizer")
+	controllerutil.RemoveFinalizer(waldurCluster, finalizer)
+	if err := r.Update(ctx, waldurCluster); err != nil {
+		return ctrl.Result{}, errors.Wrap(err, "unable to remove finalizer")
+	}
+
+	return ctrl.Result{}, nil
+}
+
 // +kubebuilder:rbac:groups=infrastructure.cluster.waldur.com,resources=waldurclusters,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=infrastructure.cluster.waldur.com,resources=waldurclusters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=infrastructure.cluster.waldur.com,resources=waldurclusters/finalizers,verbs=update
@@ -373,6 +535,23 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
+	}
+
+	log.Info("Reconciling WaldurCluster", "cluster", waldurCluster.Name, "deleting", !waldurCluster.DeletionTimestamp.IsZero())
+
+	// Handle deletion
+	if !waldurCluster.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, &waldurCluster)
+	}
+
+	// Ensure our finalizer is present before doing any work
+	if !controllerutil.ContainsFinalizer(&waldurCluster, finalizer) {
+		log.Info("Adding finalizer", "cluster", waldurCluster.Name)
+		controllerutil.AddFinalizer(&waldurCluster, finalizer)
+		if err := r.Update(ctx, &waldurCluster); err != nil {
+			return ctrl.Result{}, errors.Wrap(err, "unable to add finalizer")
+		}
+		return ctrl.Result{}, nil
 	}
 
 	cluster, err := util.GetOwnerCluster(ctx, r.Client, waldurCluster.ObjectMeta)

@@ -201,8 +201,8 @@ type WaldurOrder struct {
 	Uuid                    string                    `json:"uuid,omitempty"`
 	Type                    waldurclient.RequestTypes `json:"type,omitempty"`
 	State                   waldurclient.OrderState   `json:"state,omitempty"`
-	MarketplaceResourceUuid string                    `json:"marketplace_resource_uuid,omitempty"`
-	ResourceUuid            *string                   `json:"resource_uuid,omitempty"`
+	MarketplaceResourceUuid string                    `json:"marketplaceResourceUuid,omitempty"`
+	ResourceUuid            *string                   `json:"resourceUuid,omitempty"`
 }
 
 // OpenStackTenant tracks the OpenStack tenant provisioned for one offering.
@@ -210,6 +210,14 @@ type OpenStackTenant struct {
 	State waldurclient.CoreStates `json:"state,omitempty"`
 	Uuid  *string                 `json:"uuid,omitempty"`
 	Name  string                  `json:"name,omitempty"`
+	// MarketplaceResourceUuid is the UUID of the marketplace resource backing this tenant.
+	// Required to submit a termination order.
+	// +optional
+	MarketplaceResourceUuid string `json:"marketplaceResourceUuid,omitempty"`
+	// MarketplaceResourceState is the lifecycle state of the marketplace resource
+	// (e.g. Creating, OK, Erred, Terminating, Terminated).
+	// +optional
+	MarketplaceResourceState waldurclient.ResourceState `json:"marketplaceResourceState,omitempty"`
 	// ProjectSlug is the slug of the Waldur project created for this datacenter.
 	// +optional
 	ProjectSlug *string `json:"projectSlug,omitempty"`
