@@ -123,7 +123,6 @@ func (r *WaldurClusterReconciler) calculateLimits(ctx context.Context, offering 
 	}, nil
 }
 
-
 func (r *WaldurClusterReconciler) submitTenantCreationOrder(ctx context.Context, offering *waldurclient.PublicOfferingDetails, project *waldurclient.Project, dc infrastructurev1beta2.DatacenterSpec) (*waldurclient.OrderDetails, error) {
 	orderType := waldurclient.Create
 
@@ -235,7 +234,6 @@ func (r *WaldurClusterReconciler) refreshTenant(ctx context.Context, existing *i
 	return nil
 }
 
-
 func (r *WaldurClusterReconciler) createTenant(ctx context.Context, dc infrastructurev1beta2.DatacenterSpec) (*infrastructurev1beta2.OpenStackTenant, error) {
 	org, err := r.getCustomer(ctx, dc.OpenstackInfrastructure.CustomerName)
 	if err != nil {
@@ -294,7 +292,6 @@ func (r *WaldurClusterReconciler) createTenant(ctx context.Context, dc infrastru
 	return openStackTenant, nil
 }
 
-
 func (r *WaldurClusterReconciler) getOpenStackTenant(ctx context.Context, tenantUuid *openapitypes.UUID) (*waldurclient.OpenStackTenant, error) {
 	tenantResponse, err := r.Waldur.OpenstackTenantsRetrieveWithResponse(ctx, *tenantUuid, &waldurclient.OpenstackTenantsRetrieveParams{})
 	if err != nil {
@@ -334,7 +331,6 @@ func (r *WaldurClusterReconciler) getCustomer(ctx context.Context, orgName strin
 
 	return &orgs[0], nil
 }
-
 
 func (r *WaldurClusterReconciler) deleteProject(ctx context.Context, projectSlug string) error {
 	projectResponse, err := r.Waldur.ProjectsListWithResponse(ctx, &waldurclient.ProjectsListParams{

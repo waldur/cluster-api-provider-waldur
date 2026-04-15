@@ -49,6 +49,10 @@ spec:
               flavor:
                 description: Flavor is the OpenStack flavor name for this machine.
                 type: string
+              image:
+                description: Image is the name or UUID of the OS image to use for
+                  this VM.
+                type: string
               nodeType:
                 description: NodeType classifies this machine as a worker or storage
                   node.
@@ -74,6 +78,7 @@ spec:
                 type: integer
             required:
             - flavor
+            - image
             - nodeType
             - offeringSlug
             type: object
@@ -150,6 +155,32 @@ spec:
                     description: Provisioned indicates the machine infrastructure
                       has been provisioned.
                     type: boolean
+                type: object
+              marketplaceResourceState:
+                description: MarketplaceResourceState is the lifecycle state of the
+                  marketplace resource.
+                type: string
+              marketplaceResourceUuid:
+                description: |-
+                  MarketplaceResourceUuid is the UUID of the marketplace resource backing this VM.
+                  Required to submit a termination order.
+                type: string
+              order:
+                description: Order is the currently executing or most recent Waldur
+                  order for this VM.
+                properties:
+                  marketplaceResourceUuid:
+                    type: string
+                  resourceUuid:
+                    type: string
+                  state:
+                    description: OrderState defines model for OrderState.
+                    type: string
+                  type:
+                    description: RequestTypes defines model for RequestTypes.
+                    type: string
+                  uuid:
+                    type: string
                 type: object
               state:
                 description: State is the current Waldur resource lifecycle state
