@@ -63,7 +63,7 @@ func (r *WaldurClusterReconciler) getOrCreateProject(ctx context.Context, org *w
 
 	projects := *projectResponse.JSON200
 
-	if len(projects) < 1 {
+	if len(projects) == 0 {
 		// create a project
 		projectData := waldurclient.ProjectsCreateJSONRequestBody{
 			Name:     projectName,
@@ -76,9 +76,9 @@ func (r *WaldurClusterReconciler) getOrCreateProject(ctx context.Context, org *w
 		}
 
 		return projectCreateResponse.JSON201, nil
-	} else {
-		return &projects[0], nil
 	}
+
+	return &projects[0], nil
 
 }
 
@@ -177,8 +177,7 @@ func (r *WaldurClusterReconciler) submitTenantCreationOrder(ctx context.Context,
 	}
 
 	if orderResponse.StatusCode() != 201 {
-		body := string(orderResponse.Body[:])
-		return nil, errors.New(fmt.Sprintf("Unable to submit an order, details: %s", body))
+		return nil, errors.Errorf("unable to submit an order, details: %s", string(orderResponse.Body))
 	}
 
 	return orderResponse.JSON201, nil
@@ -189,18 +188,16 @@ func (r *WaldurClusterReconciler) refreshTenant(ctx context.Context, existing *i
 		if err := r.refreshOrder(ctx, existing.Order); err != nil {
 			return errors.Wrap(err, "unable to refresh order")
 		}
-		// If the order just got a tenant UUID, populate it on the tenant
-		if existing.Uuid == nil && existing.Order.ResourceUuid != nil {
-			existing.Uuid = existing.Order.ResourceUuid
-		}
 	}
 
+	// Populate UUID from order's resource UUID if not already set
+	if existing.Uuid == nil && existing.Order != nil {
+		existing.Uuid = existing.Order.ResourceUuid
+	}
+
+	// No UUID yet — wait for next reconcile
 	if existing.Uuid == nil {
-		if existing.Order != nil && existing.Order.ResourceUuid == nil {
-			return nil
-		} else {
-			existing.Uuid = existing.Order.ResourceUuid
-		}
+		return nil
 	}
 
 	tenantUuid, err := uuid.Parse(*existing.Uuid)
@@ -271,7 +268,6 @@ func (r *WaldurClusterReconciler) createTenant(ctx context.Context, dc infrastru
 	}
 
 	if tenantUuid == nil {
-		openStackTenant.Uuid = nil
 		openStackTenant.State = waldurclient.CoreStatesCREATING
 	} else {
 		tenantUuidStr := tenantUuid.String()
@@ -299,13 +295,10 @@ func (r *WaldurClusterReconciler) getOffering(ctx context.Context, offeringSlug 
 
 	offerings := *offeringResponse.JSON200
 	if len(offerings) == 0 {
-		msg := fmt.Sprintf("Unable to find an offering with slug %s", offeringSlug)
-		return nil, errors.New(msg)
+		return nil, errors.Errorf("unable to find an offering with slug %s", offeringSlug)
 	}
 
-	offering := offerings[0]
-
-	return &offering, nil
+	return &offerings[0], nil
 }
 
 func (r *WaldurClusterReconciler) getOpenStackTenant(ctx context.Context, tenantUuid *openapitypes.UUID) (*waldurclient.OpenStackTenant, error) {
@@ -320,14 +313,14 @@ func (r *WaldurClusterReconciler) getOpenStackTenant(ctx context.Context, tenant
 }
 
 func (r *WaldurClusterReconciler) getCustomer(ctx context.Context, orgSlug string) (*waldurclient.Customer, error) {
-	fieldFiter := []waldurclient.CustomerFieldEnum{
+	fieldFilter := []waldurclient.CustomerFieldEnum{
 		waldurclient.CustomerFieldEnumUrl,
 		waldurclient.CustomerFieldEnumSlug,
 		waldurclient.CustomerFieldEnumUuid,
 	}
 	params := waldurclient.CustomersListParams{
 		Slug:  &orgSlug,
-		Field: &fieldFiter,
+		Field: &fieldFilter,
 	}
 	orgResponse, err := r.Waldur.CustomersListWithResponse(ctx, &params)
 
@@ -336,17 +329,16 @@ func (r *WaldurClusterReconciler) getCustomer(ctx context.Context, orgSlug strin
 	}
 
 	if orgResponse.StatusCode() != 200 {
-		body := string(orgResponse.Body[:])
-		return nil, errors.New(fmt.Sprintf("Unable to get %s org, reason: %s", orgSlug, body))
+		return nil, errors.Errorf("unable to get %s org, reason: %s", orgSlug, string(orgResponse.Body))
 	}
 
 	orgs := *orgResponse.JSON200
 
 	if len(orgs) == 0 {
-		return nil, errors.New(fmt.Sprintf("Unable to fing an org with %s slug", orgSlug))
-	} else {
-		return &orgs[0], nil
+		return nil, errors.Errorf("unable to find an org with slug %s", orgSlug)
 	}
+
+	return &orgs[0], nil
 }
 
 // +kubebuilder:rbac:groups=infrastructure.cluster.waldur.com,resources=waldurclusters,verbs=get;list;watch;create;update;patch;delete
