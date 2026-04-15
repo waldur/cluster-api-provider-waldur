@@ -200,31 +200,48 @@ func (r *WaldurClusterReconciler) refreshTenant(ctx context.Context, existing *i
 		}
 	}
 
-	// Populate UUID from order's resource UUID if not already set
-	if existing.Uuid == nil && existing.Order != nil {
-		existing.Uuid = existing.Order.ResourceUuid
+	// Populate marketplace resource UUID from the order if not already set
+	if existing.MarketplaceResourceUuid == "" && existing.Order != nil {
+		existing.MarketplaceResourceUuid = existing.Order.MarketplaceResourceUuid
 	}
 
-	// No UUID yet — wait for next reconcile
-	if existing.Uuid == nil {
+	// No marketplace resource UUID yet — wait for next reconcile
+	if existing.MarketplaceResourceUuid == "" {
 		return nil
 	}
 
-	tenantUuid, err := uuid.Parse(*existing.Uuid)
+	resource, err := r.getMarketplaceResource(ctx, existing.MarketplaceResourceUuid)
 	if err != nil {
 		return err
 	}
+	if resource.State != nil {
+		existing.MarketplaceResourceState = *resource.State
+	}
+
+	// scope is the URL of the backend OpenStack tenant.
+	// nil means either not yet created or already terminated — either way there's no tenant to fetch.
+	if resource.Scope == nil {
+		return nil
+	}
+
+	if resource.ResourceUuid == nil {
+		return nil
+	}
+
+	tenantUuid := openapitypes.UUID(*resource.ResourceUuid)
 	refreshed, err := r.getOpenStackTenant(ctx, &tenantUuid)
 	if err != nil {
 		return err
 	}
 
 	prevState := existing.State
-	existing.State = *refreshed.State
-	existing.Name = *refreshed.Name
-	if refreshed.MarketplaceResourceState != nil {
-		existing.MarketplaceResourceState = waldurclient.ResourceState(*refreshed.MarketplaceResourceState)
+	if refreshed.State != nil {
+		existing.State = *refreshed.State
 	}
+	if refreshed.Name != nil {
+		existing.Name = *refreshed.Name
+	}
+	existing.Uuid = ptr.To(tenantUuid.String())
 
 	if existing.State != prevState {
 		log.Info("Tenant state changed", "tenant", existing.Name, "state", existing.State, "marketplaceResourceState", existing.MarketplaceResourceState)
@@ -335,6 +352,20 @@ func (r *WaldurClusterReconciler) getOffering(ctx context.Context, offeringSlug 
 	}
 
 	return &offerings[0], nil
+}
+
+func (r *WaldurClusterReconciler) getMarketplaceResource(ctx context.Context, marketplaceResourceUuid string) (*waldurclient.Resource, error) {
+	resourceUuid, err := uuid.Parse(marketplaceResourceUuid)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to parse marketplace resource UUID")
+	}
+
+	resp, err := r.Waldur.MarketplaceResourcesRetrieveWithResponse(ctx, resourceUuid, &waldurclient.MarketplaceResourcesRetrieveParams{})
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to retrieve marketplace resource")
+	}
+
+	return resp.JSON200, nil
 }
 
 func (r *WaldurClusterReconciler) getOpenStackTenant(ctx context.Context, tenantUuid *openapitypes.UUID) (*waldurclient.OpenStackTenant, error) {
@@ -450,10 +481,10 @@ func (r *WaldurClusterReconciler) reconcileDelete(ctx context.Context, waldurClu
 			continue
 		}
 
-		// If there's an active termination order, refresh it and wait
+		// If there's an active termination order, refresh order + tenant state and wait
 		if tenant.Order != nil && tenant.Order.Type == waldurclient.Terminate && !isOrderTerminal(tenant.Order.State) {
-			if err := r.refreshOrder(ctx, tenant.Order); err != nil {
-				log.Error(err, "Unable to refresh termination order", "offering", offeringSlug)
+			if err := r.refreshTenant(ctx, &tenant); err != nil {
+				log.Error(err, "Unable to refresh tenant during termination", "offering", offeringSlug)
 			}
 			tenants[offeringSlug] = tenant
 			allDone = false

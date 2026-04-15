@@ -258,6 +258,11 @@ spec:
                   description: OpenStackTenant tracks the OpenStack tenant provisioned
                     for one offering.
                   properties:
+                    marketplaceResourceState:
+                      description: |-
+                        MarketplaceResourceState is the lifecycle state of the marketplace resource
+                        (e.g. Creating, OK, Erred, Terminating, Terminated).
+                      type: string
                     marketplaceResourceUuid:
                       description: |-
                         MarketplaceResourceUuid is the UUID of the marketplace resource backing this tenant.
