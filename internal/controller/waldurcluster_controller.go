@@ -228,8 +228,8 @@ func (r *WaldurClusterReconciler) refreshTenant(ctx context.Context, existing *i
 		return nil
 	}
 
-	tenantUuid := openapitypes.UUID(*resource.ResourceUuid)
-	refreshed, err := r.getOpenStackTenant(ctx, &tenantUuid)
+	tenantUuid := resource.ResourceUuid
+	refreshed, err := r.getOpenStackTenant(ctx, tenantUuid)
 	if err != nil {
 		return err
 	}
