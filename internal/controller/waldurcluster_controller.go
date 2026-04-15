@@ -82,7 +82,60 @@ func (r *WaldurClusterReconciler) getOrCreateProject(ctx context.Context, org *w
 
 }
 
-func (r *WaldurClusterReconciler) submitTenantCreationOrder(ctx context.Context, offering *waldurclient.PublicOfferingDetails, project *waldurclient.Project) (*waldurclient.OrderDetails, error) {
+// controllerNodeCores and controllerNodeRam are the per-node resource defaults for
+// the 3 controller nodes auto-provisioned by the platform (not user-configurable).
+const (
+	controllerNodeCores = 4
+	controllerNodeRamMB = 8 * 1024
+	lbNodeCores         = 2
+	lbNodeRamMB         = 4 * 1024
+	systemDiskMB        = 20 * 1024
+)
+
+func (r *WaldurClusterReconciler) calculateLimits(ctx context.Context, offering *waldurclient.PublicOfferingDetails, dc infrastructurev1beta2.DatacenterSpec) (map[string]int, error) {
+	cores := 3*controllerNodeCores + lbNodeCores
+	ram := 3*controllerNodeRamMB + lbNodeRamMB
+	storage := (3 + 1) * systemDiskMB // controller + lb system disks
+
+	for _, ng := range dc.NodeGroups {
+		flavor, err := r.getFlavor(ctx, offering, ng.Flavor)
+		if err != nil {
+			return nil, errors.Wrapf(err, "unable to get flavor %q", ng.Flavor)
+		}
+		cores += ng.Count * *flavor.Cores
+		ram += ng.Count * *flavor.Ram
+		storage += ng.Count * systemDiskMB
+		if ng.DataDiskSize != nil {
+			storage += ng.Count * *ng.DataDiskSize * 1024
+		}
+		if ng.VsanDiskSize != nil {
+			storage += ng.Count * *ng.VsanDiskSize * 1024
+		}
+	}
+
+	return map[string]int{
+		"cores":   cores,
+		"ram":     ram,
+		"storage": storage,
+	}, nil
+}
+
+func (r *WaldurClusterReconciler) getFlavor(ctx context.Context, offering *waldurclient.PublicOfferingDetails, flavorName string) (*waldurclient.OpenStackFlavor, error) {
+	resp, err := r.Waldur.OpenstackFlavorsListWithResponse(ctx, &waldurclient.OpenstackFlavorsListParams{
+		OfferingUuid: offering.Uuid,
+		NameExact:    &flavorName,
+	})
+	if err != nil {
+		return nil, err
+	}
+	flavors := *resp.JSON200
+	if len(flavors) == 0 {
+		return nil, errors.Errorf("flavor %q not found in offering %s", flavorName, *offering.Slug)
+	}
+	return &flavors[0], nil
+}
+
+func (r *WaldurClusterReconciler) submitTenantCreationOrder(ctx context.Context, offering *waldurclient.PublicOfferingDetails, project *waldurclient.Project, dc infrastructurev1beta2.DatacenterSpec) (*waldurclient.OrderDetails, error) {
 	orderType := waldurclient.Create
 
 	subnetCidr := "192.168.42.0/24" // TODO: make configurable
@@ -98,10 +151,9 @@ func (r *WaldurClusterReconciler) submitTenantCreationOrder(ctx context.Context,
 		return nil, err
 	}
 
-	limits := map[string]int{ // TODO: calculate based on node configs
-		"cores":   8,
-		"ram":     16 * 1024,
-		"storage": 50 * 1024,
+	limits, err := r.calculateLimits(ctx, offering, dc)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to calculate tenant resource limits")
 	}
 
 	plans := *offering.Plans
@@ -194,13 +246,13 @@ func (r *WaldurClusterReconciler) refreshOrder(ctx context.Context, existingOrde
 	return nil
 }
 
-func (r *WaldurClusterReconciler) createTenant(ctx context.Context, offeringSlug string, project *waldurclient.Project) (*infrastructurev1beta2.OpenStackTenant, error) {
-	offering, err := r.getOffering(ctx, offeringSlug)
+func (r *WaldurClusterReconciler) createTenant(ctx context.Context, dc infrastructurev1beta2.DatacenterSpec, project *waldurclient.Project) (*infrastructurev1beta2.OpenStackTenant, error) {
+	offering, err := r.getOffering(ctx, dc.OfferingSlug)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to get offering details")
 	}
 
-	order, err := r.submitTenantCreationOrder(ctx, offering, project)
+	order, err := r.submitTenantCreationOrder(ctx, offering, project, dc)
 	if err != nil || order == nil {
 		return nil, errors.Wrap(err, "unable to submit order")
 	}
@@ -367,7 +419,7 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			continue
 		}
 
-		tenant, err := r.createTenant(ctx, offeringSlug, project)
+		tenant, err := r.createTenant(ctx, dc, project)
 		if err != nil {
 			log.Error(err, "Unable to create tenant", "offering", offeringSlug)
 			continue
