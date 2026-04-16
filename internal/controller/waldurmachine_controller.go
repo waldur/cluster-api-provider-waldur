@@ -425,7 +425,7 @@ func (r *WaldurMachineReconciler) getVMOffering(ctx context.Context, parentOffer
 	}
 
 	if offeringsResponse.StatusCode() != 200 {
-		return nil, errors.Errorf("Unable to list VM offerings for the parent offering %s, code %d, reason %s", *parentOffering.Name, offeringsResponse.StatusCode, string(offeringsResponse.Body))
+		return nil, errors.Errorf("Unable to list VM offerings for the parent offering %s, code %d, reason %s", *parentOffering.Name, offeringsResponse.StatusCode(), string(offeringsResponse.Body))
 	}
 
 	offerings := *offeringsResponse.JSON200
