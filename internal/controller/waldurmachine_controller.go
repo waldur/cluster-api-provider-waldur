@@ -175,10 +175,10 @@ func (r *WaldurMachineReconciler) createVM(ctx context.Context, waldurMachine *i
 	if err != nil {
 		return errors.Wrap(err, "unable to get parent offering")
 	}
-	
+
 	// Get the VM offering
 	offering, err := r.getVMOffering(ctx, parentOffering)
-	
+
 	if err != nil {
 		return errors.Wrap(err, "unable to get VM offering")
 	}
@@ -237,9 +237,9 @@ func (r *WaldurMachineReconciler) createVM(ctx context.Context, waldurMachine *i
 	orderType := waldurclient.Create
 	floatingIps := []waldurclient.OpenStackCreateFloatingIPRequest{}
 	rawAttrs := waldurclient.OpenStackInstanceCreateOrderAttributes{
-		Name:         waldurMachine.Name,
-		Flavor:       flavor.Url,
-		Image:        image.Url,
+		Name:           waldurMachine.Name,
+		Flavor:         flavor.Url,
+		Image:          image.Url,
 		SecurityGroups: &sgRequests,
 		Ports:          &portRequests,
 		FloatingIps:    &floatingIps,
@@ -322,7 +322,7 @@ func (r *WaldurMachineReconciler) refreshVM(ctx context.Context, waldurMachine *
 	if resource.Scope == nil || resource.ResourceUuid == nil {
 		return nil
 	}
-	
+
 	instanceResp, err := r.Waldur.OpenstackInstancesRetrieveWithResponse(ctx, *resource.ResourceUuid, &waldurclient.OpenstackInstancesRetrieveParams{
 		Field: &[]waldurclient.OpenStackInstanceFieldEnum{
 			waldurclient.OpenStackInstanceFieldEnumState,
@@ -415,21 +415,21 @@ func (r *WaldurMachineReconciler) reconcileDelete(ctx context.Context, waldurMac
 
 func (r *WaldurMachineReconciler) getVMOffering(ctx context.Context, parentOffering *waldurclient.PublicOfferingDetails) (*waldurclient.PublicOfferingDetails, error) {
 	params := waldurclient.MarketplacePublicOfferingsListParams{
-		Type: &[]string{"OpenStack.Instance"},
+		Type:       &[]string{"OpenStack.Instance"},
 		ParentUuid: parentOffering.Uuid,
 	}
 	offeringsResponse, err := r.Waldur.MarketplacePublicOfferingsListWithResponse(ctx, &params)
-	
+
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if offeringsResponse.StatusCode() != 200 {
-		return nil, errors.Errorf("Unable to list VM offerings for the parent offering %s, code %s, reason %s", *parentOffering.Name, offeringsResponse.StatusCode, string(offeringsResponse.Body))
+		return nil, errors.Errorf("Unable to list VM offerings for the parent offering %s, code %d, reason %s", *parentOffering.Name, offeringsResponse.StatusCode, string(offeringsResponse.Body))
 	}
-	
+
 	offerings := *offeringsResponse.JSON200
-	
+
 	if len(offerings) == 0 {
 		return nil, errors.Errorf("Unable to find a VM offering for the parent offering %s, list is empty", *parentOffering.Name)
 	} else {
