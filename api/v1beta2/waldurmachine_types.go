@@ -42,6 +42,11 @@ type WaldurMachineSpec struct {
 	// Image is the name or UUID of the OS image to use for this VM.
 	Image string `json:"image"`
 
+	// SystemDiskSize is the size in GB of the system (root) disk.
+	// +kubebuilder:validation:Minimum=10
+	// +optional
+	SystemDiskSize *int `json:"systemDiskSize,omitempty"`
+
 	// DataDiskSize is the size in GB of the data disk. Applicable to worker nodes.
 	// +kubebuilder:validation:Minimum=10
 	// +optional

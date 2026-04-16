@@ -57,6 +57,39 @@ func getImage(ctx context.Context, waldur waldurclient.ClientWithResponses, offe
 	return &images[0], nil
 }
 
+// getTenantSecurityGroups returns all security groups belonging to a tenant.
+func getTenantSecurityGroups(ctx context.Context, waldur waldurclient.ClientWithResponses, tenantUuid uuid.UUID) ([]waldurclient.OpenStackSecurityGroup, error) {
+	resp, err := waldur.OpenstackSecurityGroupsListWithResponse(ctx, &waldurclient.OpenstackSecurityGroupsListParams{
+		TenantUuid: &tenantUuid,
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to list security groups")
+	}
+	return *resp.JSON200, nil
+}
+
+// getTenantSubnets returns all subnets belonging to a tenant.
+func getTenantSubnets(ctx context.Context, waldur waldurclient.ClientWithResponses, tenantUuid uuid.UUID) ([]waldurclient.OpenStackSubNet, error) {
+	resp, err := waldur.OpenstackSubnetsListWithResponse(ctx, &waldurclient.OpenstackSubnetsListParams{
+		TenantUuid: &tenantUuid,
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to list subnets")
+	}
+	return *resp.JSON200, nil
+}
+
+// getTenantVolumeTypes returns all volume types available in a tenant.
+func getTenantVolumeTypes(ctx context.Context, waldur waldurclient.ClientWithResponses, tenantUuid uuid.UUID) ([]waldurclient.OpenStackVolumeType, error) {
+	resp, err := waldur.OpenstackVolumeTypesListWithResponse(ctx, &waldurclient.OpenstackVolumeTypesListParams{
+		TenantUuid: &tenantUuid,
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to list volume types")
+	}
+	return *resp.JSON200, nil
+}
+
 // getOffering looks up a Waldur marketplace offering by slug.
 func getOffering(ctx context.Context, waldur waldurclient.ClientWithResponses, offeringSlug string) (*waldurclient.PublicOfferingDetails, error) {
 	offeringResponse, err := waldur.MarketplacePublicOfferingsListWithResponse(ctx, &waldurclient.MarketplacePublicOfferingsListParams{

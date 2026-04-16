@@ -377,6 +377,11 @@ func (in *WaldurMachineSpec) DeepCopyInto(out *WaldurMachineSpec) {
 		*out = new(string)
 		**out = **in
 	}
+	if in.SystemDiskSize != nil {
+		in, out := &in.SystemDiskSize, &out.SystemDiskSize
+		*out = new(int)
+		**out = **in
+	}
 	if in.DataDiskSize != nil {
 		in, out := &in.DataDiskSize, &out.DataDiskSize
 		*out = new(int)

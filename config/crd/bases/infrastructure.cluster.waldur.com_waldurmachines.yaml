@@ -71,6 +71,11 @@ spec:
                   ProviderID is the identifier of the VM in the cloud provider, set after provisioning.
                   Follows the format "waldur://<vm-uuid>". Required by the CAPI Machine controller.
                 type: string
+              systemDiskSize:
+                description: SystemDiskSize is the size in GB of the system (root)
+                  disk.
+                minimum: 10
+                type: integer
               vsanDiskSize:
                 description: VsanDiskSize is the size in GB of the vSAN disk. Required
                   for storage nodes.
