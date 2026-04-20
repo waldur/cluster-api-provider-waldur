@@ -103,7 +103,7 @@ func (c *client) login() error {
 	if err != nil {
 		return fmt.Errorf("vault: kubernetes auth request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
@@ -126,13 +126,13 @@ func (c *client) login() error {
 }
 
 // do performs an authenticated request, retrying once after re-login on 401/403.
-func (c *client) do(ctx context.Context, method, path string, body interface{}) (*http.Response, error) {
+func (c *client) do(ctx context.Context, method, path string, body any) (*http.Response, error) {
 	resp, err := c.doOnce(ctx, method, path, body)
 	if err != nil {
 		return nil, err
 	}
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if loginErr := c.login(); loginErr != nil {
 			return nil, fmt.Errorf("vault: re-authentication failed: %w", loginErr)
 		}
@@ -141,7 +141,7 @@ func (c *client) do(ctx context.Context, method, path string, body interface{}) 
 	return resp, nil
 }
 
-func (c *client) doOnce(ctx context.Context, method, path string, body interface{}) (*http.Response, error) {
+func (c *client) doOnce(ctx context.Context, method, path string, body any) (*http.Response, error) {
 	var bodyReader io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -171,7 +171,7 @@ func (c *client) SecretExists(ctx context.Context, path string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("vault: SecretExists GET %s: %w", path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return false, nil
@@ -186,14 +186,14 @@ func (c *client) SecretExists(ctx context.Context, path string) (bool, error) {
 // WriteSecret writes key-value pairs to a KV v2 secret.
 // path should be in the form "secret/data/..." — the raw KV v2 API path.
 func (c *client) WriteSecret(ctx context.Context, path string, data map[string]string) error {
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"data": data,
 	}
 	resp, err := c.do(ctx, http.MethodPost, path, payload)
 	if err != nil {
 		return fmt.Errorf("vault: WriteSecret POST %s: %w", path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		b, _ := io.ReadAll(resp.Body)
@@ -205,11 +205,11 @@ func (c *client) WriteSecret(ctx context.Context, path string, data map[string]s
 // GenerateSecretID generates a single-use AppRole secret_id for the given role name.
 func (c *client) GenerateSecretID(ctx context.Context, roleName string) (string, error) {
 	path := fmt.Sprintf("auth/approle/role/%s/secret-id", roleName)
-	resp, err := c.do(ctx, http.MethodPost, path, map[string]interface{}{})
+	resp, err := c.do(ctx, http.MethodPost, path, map[string]any{})
 	if err != nil {
 		return "", fmt.Errorf("vault: GenerateSecretID for role %q: %w", roleName, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
@@ -238,7 +238,7 @@ func (c *client) RevokeSecretID(ctx context.Context, roleName, secretID string) 
 	if err != nil {
 		return fmt.Errorf("vault: RevokeSecretID for role %q: %w", roleName, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)

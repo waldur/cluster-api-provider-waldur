@@ -28,8 +28,8 @@ const rke2ConfigPath = "/etc/rancher/rke2/config.yaml"
 // CloudInit represents the subset of cloud-init directives used in this provider.
 type CloudInit struct {
 	WriteFiles []CloudInitFile `yaml:"write_files,omitempty"`
-	RunCmd     []interface{}   `yaml:"runcmd,omitempty"`
-	BootCmd    []interface{}   `yaml:"bootcmd,omitempty"`
+	RunCmd     []any           `yaml:"runcmd,omitempty"`
+	BootCmd    []any           `yaml:"bootcmd,omitempty"`
 }
 
 // CloudInitFile represents a single write_files entry.
@@ -77,7 +77,7 @@ func stripRKE2Token(rawCloudInit []byte) (sanitised []byte, token string, err er
 		if f.Path != rke2ConfigPath {
 			continue
 		}
-		var rke2cfg map[string]interface{}
+		var rke2cfg map[string]any
 		if err := yaml.Unmarshal([]byte(f.Content), &rke2cfg); err != nil {
 			return nil, "", fmt.Errorf("failed to parse embedded rke2 config: %w", err)
 		}
@@ -176,7 +176,7 @@ rm -f /etc/vault/role-id /etc/vault/secret-id
 	merged.WriteFiles = append(vaultFiles, merged.WriteFiles...)
 
 	// vault-fetch runs before all other runcmd steps
-	merged.RunCmd = append([]interface{}{
+	merged.RunCmd = append([]any{
 		"/var/opt/scripts/vault-fetch-rke2-token.sh",
 	}, merged.RunCmd...)
 

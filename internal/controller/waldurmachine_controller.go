@@ -178,7 +178,7 @@ func (r *WaldurMachineReconciler) createVM(ctx context.Context, machine *cluster
 	// Read the bootstrap Secret produced by the RKE2 bootstrap provider.
 	// secret.Data["value"] is the full cloud-init YAML including the RKE2 join token.
 	bootstrapSecret := &corev1.Secret{}
-	if err := r.Client.Get(ctx, types.NamespacedName{
+	if err := r.Get(ctx, types.NamespacedName{
 		Namespace: machine.Namespace,
 		Name:      *machine.Spec.Bootstrap.DataSecretName,
 	}, bootstrapSecret); err != nil {
@@ -204,132 +204,9 @@ func (r *WaldurMachineReconciler) createVM(ctx context.Context, machine *cluster
 		userData = &ud
 	}
 
-	tenant, ok := waldurCluster.Status.Tenants[waldurMachine.Spec.OfferingSlug]
-	if !ok {
-		return errors.Errorf("tenant for offering %q not found in WaldurCluster status", waldurMachine.Spec.OfferingSlug)
-	}
-	if tenant.MarketplaceResourceState != waldurclient.ResourceStateOK {
-		return errors.Errorf("tenant for offering %q is not ready (state: %s)", waldurMachine.Spec.OfferingSlug, tenant.MarketplaceResourceState)
-	}
-	if tenant.ProjectSlug == nil {
-		return errors.Errorf("tenant for offering %q has no project slug", waldurMachine.Spec.OfferingSlug)
-	}
-
-	// Look up the project by slug to get its URL
-	projectResp, err := r.Waldur.ProjectsListWithResponse(ctx, &waldurclient.ProjectsListParams{
-		Slug: tenant.ProjectSlug,
-	})
+	orderPayload, err := r.buildOrderPayload(ctx, waldurMachine, waldurCluster, userData)
 	if err != nil {
-		return errors.Wrap(err, "unable to list projects")
-	}
-	projects := *projectResp.JSON200
-	if len(projects) == 0 {
-		return errors.Errorf("project with slug %q not found", *tenant.ProjectSlug)
-	}
-	project := &projects[0]
-
-	// Get the parentOffering
-	parentOffering, err := getOffering(ctx, r.Waldur, waldurMachine.Spec.OfferingSlug)
-	if err != nil {
-		return errors.Wrap(err, "unable to get parent offering")
-	}
-
-	// Get the VM offering
-	offering, err := r.getVMOffering(ctx, parentOffering)
-
-	if err != nil {
-		return errors.Wrap(err, "unable to get VM offering")
-	}
-
-	// Parse tenant UUID for resource lookups scoped to the OpenStack tenant
-	if tenant.Uuid == nil {
-		return errors.Errorf("tenant for offering %q has no UUID yet", waldurMachine.Spec.OfferingSlug)
-	}
-	tenantUuid, err := uuid.Parse(*tenant.Uuid)
-	if err != nil {
-		return errors.Wrap(err, "unable to parse tenant UUID")
-	}
-
-	// Resolve flavor name → URL
-	flavor, err := getFlavor(ctx, r.Waldur, parentOffering, waldurMachine.Spec.Flavor)
-	if err != nil {
-		return errors.Wrapf(err, "unable to get flavor %q", waldurMachine.Spec.Flavor)
-	}
-
-	// Resolve image name → URL
-	image, err := getImage(ctx, r.Waldur, parentOffering, waldurMachine.Spec.Image)
-	if err != nil {
-		return errors.Wrapf(err, "unable to get image %q", waldurMachine.Spec.Image)
-	}
-
-	// Look up security groups in the tenant
-	securityGroups, err := getTenantSecurityGroups(ctx, r.Waldur, tenantUuid)
-	if err != nil {
-		return errors.Wrap(err, "unable to get security groups")
-	}
-	sgRequests := make([]waldurclient.OpenStackSecurityGroupHyperlinkRequest, 0, len(securityGroups))
-	for _, sg := range securityGroups {
-		if sg.Url != nil {
-			sgRequests = append(sgRequests, waldurclient.OpenStackSecurityGroupHyperlinkRequest{Url: *sg.Url})
-		}
-	}
-
-	// Look up subnets in the tenant (one port per internal subnet)
-	subnets, err := getTenantSubnets(ctx, r.Waldur, tenantUuid)
-	if err != nil {
-		return errors.Wrap(err, "unable to get subnets")
-	}
-	portRequests := make([]waldurclient.OpenStackCreateInstancePortRequest, 0, len(subnets))
-	for _, sn := range subnets {
-		if sn.Url != nil {
-			portRequests = append(portRequests, waldurclient.OpenStackCreateInstancePortRequest{Subnet: sn.Url})
-		}
-	}
-
-	// Look up volume types in the tenant (use first available for both system and data)
-	volumeTypes, err := getTenantVolumeTypes(ctx, r.Waldur, tenantUuid)
-	if err != nil {
-		return errors.Wrap(err, "unable to get volume types")
-	}
-
-	orderType := waldurclient.Create
-	floatingIps := []waldurclient.OpenStackCreateFloatingIPRequest{}
-	rawAttrs := waldurclient.OpenStackInstanceCreateOrderAttributes{
-		Name:           waldurMachine.Name,
-		Flavor:         flavor.Url,
-		Image:          image.Url,
-		SecurityGroups: &sgRequests,
-		Ports:          &portRequests,
-		FloatingIps:    &floatingIps,
-		UserData:       userData,
-	}
-
-	if waldurMachine.Spec.SystemDiskSize != nil {
-		systemSizeMiB := *waldurMachine.Spec.SystemDiskSize * 1024
-		rawAttrs.SystemVolumeSize = &systemSizeMiB
-	}
-	if waldurMachine.Spec.DataDiskSize != nil {
-		dataSizeMiB := *waldurMachine.Spec.DataDiskSize * 1024
-		rawAttrs.DataVolumeSize = &dataSizeMiB
-	}
-	if len(volumeTypes) > 0 && volumeTypes[0].Url != nil {
-		rawAttrs.SystemVolumeType = volumeTypes[0].Url
-		rawAttrs.DataVolumeType = volumeTypes[0].Url
-	}
-
-	attrs := waldurclient.OrderCreateRequest_Attributes{}
-	if err := attrs.FromOpenStackInstanceCreateOrderAttributes(rawAttrs); err != nil {
-		return errors.Wrap(err, "unable to build order attributes")
-	}
-
-	acceptingTermsOfService := true
-
-	orderPayload := waldurclient.MarketplaceOrdersCreateJSONRequestBody{
-		Type:                    &orderType,
-		Offering:                *offering.Url,
-		Project:                 *project.Url,
-		Attributes:              &attrs,
-		AcceptingTermsOfService: &acceptingTermsOfService,
+		return err
 	}
 
 	log.Info("Submitting VM creation order", "machine", waldurMachine.Name, "offering", waldurMachine.Spec.OfferingSlug)
@@ -357,6 +234,130 @@ func (r *WaldurMachineReconciler) createVM(ctx context.Context, machine *cluster
 	waldurMachine.Status.State = waldurclient.CoreStatesCREATING
 
 	return nil
+}
+
+// buildOrderPayload resolves all Waldur API references (project, offering, flavor, image,
+// security groups, subnets, volume types) and assembles the marketplace order payload.
+// Extracted from createVM to keep cyclomatic complexity in check.
+func (r *WaldurMachineReconciler) buildOrderPayload(
+	ctx context.Context,
+	waldurMachine *infrastructurev1beta2.WaldurMachine,
+	waldurCluster *infrastructurev1beta2.WaldurCluster,
+	userData *string,
+) (waldurclient.MarketplaceOrdersCreateJSONRequestBody, error) {
+	tenant, ok := waldurCluster.Status.Tenants[waldurMachine.Spec.OfferingSlug]
+	if !ok {
+		return waldurclient.MarketplaceOrdersCreateJSONRequestBody{}, errors.Errorf("tenant for offering %q not found in WaldurCluster status", waldurMachine.Spec.OfferingSlug)
+	}
+	if tenant.MarketplaceResourceState != waldurclient.ResourceStateOK {
+		return waldurclient.MarketplaceOrdersCreateJSONRequestBody{}, errors.Errorf("tenant for offering %q is not ready (state: %s)", waldurMachine.Spec.OfferingSlug, tenant.MarketplaceResourceState)
+	}
+	if tenant.ProjectSlug == nil {
+		return waldurclient.MarketplaceOrdersCreateJSONRequestBody{}, errors.Errorf("tenant for offering %q has no project slug", waldurMachine.Spec.OfferingSlug)
+	}
+	if tenant.Uuid == nil {
+		return waldurclient.MarketplaceOrdersCreateJSONRequestBody{}, errors.Errorf("tenant for offering %q has no UUID yet", waldurMachine.Spec.OfferingSlug)
+	}
+
+	projectResp, err := r.Waldur.ProjectsListWithResponse(ctx, &waldurclient.ProjectsListParams{Slug: tenant.ProjectSlug})
+	if err != nil {
+		return waldurclient.MarketplaceOrdersCreateJSONRequestBody{}, errors.Wrap(err, "unable to list projects")
+	}
+	projects := *projectResp.JSON200
+	if len(projects) == 0 {
+		return waldurclient.MarketplaceOrdersCreateJSONRequestBody{}, errors.Errorf("project with slug %q not found", *tenant.ProjectSlug)
+	}
+
+	parentOffering, err := getOffering(ctx, r.Waldur, waldurMachine.Spec.OfferingSlug)
+	if err != nil {
+		return waldurclient.MarketplaceOrdersCreateJSONRequestBody{}, errors.Wrap(err, "unable to get parent offering")
+	}
+
+	offering, err := r.getVMOffering(ctx, parentOffering)
+	if err != nil {
+		return waldurclient.MarketplaceOrdersCreateJSONRequestBody{}, errors.Wrap(err, "unable to get VM offering")
+	}
+
+	tenantUuid, err := uuid.Parse(*tenant.Uuid)
+	if err != nil {
+		return waldurclient.MarketplaceOrdersCreateJSONRequestBody{}, errors.Wrap(err, "unable to parse tenant UUID")
+	}
+
+	flavor, err := getFlavor(ctx, r.Waldur, parentOffering, waldurMachine.Spec.Flavor)
+	if err != nil {
+		return waldurclient.MarketplaceOrdersCreateJSONRequestBody{}, errors.Wrapf(err, "unable to get flavor %q", waldurMachine.Spec.Flavor)
+	}
+
+	image, err := getImage(ctx, r.Waldur, parentOffering, waldurMachine.Spec.Image)
+	if err != nil {
+		return waldurclient.MarketplaceOrdersCreateJSONRequestBody{}, errors.Wrapf(err, "unable to get image %q", waldurMachine.Spec.Image)
+	}
+
+	securityGroups, err := getTenantSecurityGroups(ctx, r.Waldur, tenantUuid)
+	if err != nil {
+		return waldurclient.MarketplaceOrdersCreateJSONRequestBody{}, errors.Wrap(err, "unable to get security groups")
+	}
+	sgRequests := make([]waldurclient.OpenStackSecurityGroupHyperlinkRequest, 0, len(securityGroups))
+	for _, sg := range securityGroups {
+		if sg.Url != nil {
+			sgRequests = append(sgRequests, waldurclient.OpenStackSecurityGroupHyperlinkRequest{Url: *sg.Url})
+		}
+	}
+
+	subnets, err := getTenantSubnets(ctx, r.Waldur, tenantUuid)
+	if err != nil {
+		return waldurclient.MarketplaceOrdersCreateJSONRequestBody{}, errors.Wrap(err, "unable to get subnets")
+	}
+	portRequests := make([]waldurclient.OpenStackCreateInstancePortRequest, 0, len(subnets))
+	for _, sn := range subnets {
+		if sn.Url != nil {
+			portRequests = append(portRequests, waldurclient.OpenStackCreateInstancePortRequest{Subnet: sn.Url})
+		}
+	}
+
+	volumeTypes, err := getTenantVolumeTypes(ctx, r.Waldur, tenantUuid)
+	if err != nil {
+		return waldurclient.MarketplaceOrdersCreateJSONRequestBody{}, errors.Wrap(err, "unable to get volume types")
+	}
+
+	floatingIps := []waldurclient.OpenStackCreateFloatingIPRequest{}
+	rawAttrs := waldurclient.OpenStackInstanceCreateOrderAttributes{
+		Name:           waldurMachine.Name,
+		Flavor:         flavor.Url,
+		Image:          image.Url,
+		SecurityGroups: &sgRequests,
+		Ports:          &portRequests,
+		FloatingIps:    &floatingIps,
+		UserData:       userData,
+	}
+	if waldurMachine.Spec.SystemDiskSize != nil {
+		systemSizeMiB := *waldurMachine.Spec.SystemDiskSize * 1024
+		rawAttrs.SystemVolumeSize = &systemSizeMiB
+	}
+	if waldurMachine.Spec.DataDiskSize != nil {
+		dataSizeMiB := *waldurMachine.Spec.DataDiskSize * 1024
+		rawAttrs.DataVolumeSize = &dataSizeMiB
+	}
+	if len(volumeTypes) > 0 && volumeTypes[0].Url != nil {
+		rawAttrs.SystemVolumeType = volumeTypes[0].Url
+		rawAttrs.DataVolumeType = volumeTypes[0].Url
+	}
+
+	attrs := waldurclient.OrderCreateRequest_Attributes{}
+	if err := attrs.FromOpenStackInstanceCreateOrderAttributes(rawAttrs); err != nil {
+		return waldurclient.MarketplaceOrdersCreateJSONRequestBody{}, errors.Wrap(err, "unable to build order attributes")
+	}
+
+	orderType := waldurclient.Create
+	acceptingTermsOfService := true
+	payload := waldurclient.MarketplaceOrdersCreateJSONRequestBody{
+		Type:                    &orderType,
+		Offering:                *offering.Url,
+		Project:                 *projects[0].Url,
+		Attributes:              &attrs,
+		AcceptingTermsOfService: &acceptingTermsOfService,
+	}
+	return payload, nil
 }
 
 func (r *WaldurMachineReconciler) refreshVM(ctx context.Context, waldurMachine *infrastructurev1beta2.WaldurMachine) error {
@@ -494,7 +495,7 @@ func (r *WaldurMachineReconciler) buildUserDataWithVault(ctx context.Context, ma
 	// Read the vault-config-<clusterName> Secret written by Crossplane at cluster creation.
 	vaultConfigSecret := &corev1.Secret{}
 	secretName := fmt.Sprintf("vault-config-%s", machine.Spec.ClusterName)
-	if err := r.Client.Get(ctx, types.NamespacedName{
+	if err := r.Get(ctx, types.NamespacedName{
 		Namespace: r.OperatorNamespace,
 		Name:      secretName,
 	}, vaultConfigSecret); err != nil {
