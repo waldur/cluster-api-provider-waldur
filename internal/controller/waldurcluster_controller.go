@@ -126,7 +126,7 @@ func (r *WaldurClusterReconciler) calculateLimits(ctx context.Context, offering 
 func (r *WaldurClusterReconciler) submitTenantCreationOrder(ctx context.Context, offering *waldurclient.PublicOfferingDetails, project *waldurclient.Project, dc infrastructurev1beta2.DatacenterSpec) (*waldurclient.OrderDetails, error) {
 	orderType := waldurclient.Create
 
-	subnetCidr := "192.168.42.0/24" // TODO: make configurable
+	subnetCidr := "192.168.42.0/24" // TODO: make configurable for multiple tenants
 	tenantName := fmt.Sprintf("%s-%s", *offering.Slug, *project.Name)
 	rawAttrs := waldurclient.OpenStackTenantCreateOrderAttributes{
 		Name:       tenantName,
@@ -443,7 +443,7 @@ func (r *WaldurClusterReconciler) reconcileDelete(ctx context.Context, waldurClu
 // +kubebuilder:rbac:groups=infrastructure.cluster.waldur.com,resources=waldurclusters,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=infrastructure.cluster.waldur.com,resources=waldurclusters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=infrastructure.cluster.waldur.com,resources=waldurclusters/finalizers,verbs=update
-// +kubebuilder:rbac:groups=infrastructure.cluster.waldur.com,resources=machines;machines/status,verbs=get;list;watch
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters;clusters/status,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.

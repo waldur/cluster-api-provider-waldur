@@ -77,6 +77,22 @@ spec:
             secretKeyRef:
               name: waldur-api-secret
               key: TOKEN
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        # VAULT_ADDR and VAULT_K8S_ROLE are optional.
+        # When VAULT_ADDR is unset the controller passes bootstrap cloud-init verbatim
+        # and the RKE2 join token will appear in Waldur's user_data store.
+        # Uncomment and set these to enable Vault integration:
+        #- name: VAULT_ADDR
+        #  value: "https://vault.example.com:8200"
+        #- name: VAULT_K8S_ROLE
+        #  value: "waldur-capi-controller"
+        # BASE_TEMPLATE_CONFIGMAP is optional. Set to the name of a ConfigMap in the
+        # operator namespace containing a cloud-init.yaml key with static OS sections.
+        #- name: BASE_TEMPLATE_CONFIGMAP
+        #  value: "cloud-init-base"
         securityContext:
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false

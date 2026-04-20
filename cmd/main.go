@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"net/http"
@@ -27,6 +28,7 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -38,10 +40,12 @@ import (
 
 	infrastructurev1beta2 "github.com/sergei-zaiaev/cluster-api-provider-waldur/api/v1beta2"
 	"github.com/sergei-zaiaev/cluster-api-provider-waldur/internal/controller"
+	vaultpkg "github.com/sergei-zaiaev/cluster-api-provider-waldur/internal/vault"
 
 	// +kubebuilder:scaffold:imports
 
 	waldurclient "github.com/waldur/go-client"
+	corev1 "k8s.io/api/core/v1"
 	clusterv1beta2 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 )
 
@@ -221,6 +225,56 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Determine the namespace the controller runs in.
+	// Set via the Downward API in the Deployment spec; fallback to the default install namespace.
+	operatorNamespace := os.Getenv("POD_NAMESPACE")
+	if operatorNamespace == "" {
+		operatorNamespace = "cluster-api-provider-waldur-system"
+	}
+
+	// Load optional static OS cloud-init base template from a ConfigMap.
+	var baseTemplate []byte
+	baseTemplateConfigMap := os.Getenv("BASE_TEMPLATE_CONFIGMAP")
+	if baseTemplateConfigMap != "" {
+		cm := &corev1.ConfigMap{}
+		if err := mgr.GetAPIReader().Get(context.Background(), types.NamespacedName{
+			Namespace: operatorNamespace,
+			Name:      baseTemplateConfigMap,
+		}, cm); err != nil {
+			setupLog.Error(err, "Failed to load base template ConfigMap", "name", baseTemplateConfigMap)
+			os.Exit(1)
+		}
+		if data, ok := cm.Data["cloud-init.yaml"]; ok {
+			baseTemplate = []byte(data)
+			setupLog.Info("Loaded base cloud-init template", "configmap", baseTemplateConfigMap, "bytes", len(baseTemplate))
+		} else {
+			setupLog.Info("ConfigMap has no cloud-init.yaml key, base template not loaded", "configmap", baseTemplateConfigMap)
+		}
+	}
+
+	// Initialize Vault client (optional — disabled when VAULT_ADDR is unset).
+	var vaultClient vaultpkg.Client
+	vaultAddr := os.Getenv("VAULT_ADDR")
+	if vaultAddr != "" {
+		// The role used by the controller to interact with Vault
+		vaultRole := os.Getenv("VAULT_K8S_ROLE")
+		if vaultRole == "" {
+			vaultRole = "waldur-capi-controller"
+		}
+		vc, err := vaultpkg.NewClient(vaultpkg.Config{
+			Addr: vaultAddr,
+			Role: vaultRole,
+		})
+		if err != nil {
+			setupLog.Error(err, "Failed to initialize Vault client", "addr", vaultAddr)
+			os.Exit(1)
+		}
+		vaultClient = vc
+		setupLog.Info("Vault client initialized", "addr", vaultAddr, "role", vaultRole)
+	} else {
+		setupLog.Info("VAULT_ADDR not set — Vault integration disabled; RKE2 token will appear in user_data")
+	}
+
 	if err := (&controller.WaldurClusterReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
@@ -230,9 +284,12 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.WaldurMachineReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		Waldur: *waldur,
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		Waldur:            *waldur,
+		VaultClient:       vaultClient,
+		BaseTemplate:      baseTemplate,
+		OperatorNamespace: operatorNamespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "WaldurMachine")
 		os.Exit(1)

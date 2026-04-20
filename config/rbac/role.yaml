@@ -5,10 +5,10 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
-  - infrastructure.cluster.waldur.com
+  - cluster.x-k8s.io
   resources:
-  - machines
-  - machines/status
+  - clusters
+  - clusters/status
   verbs:
   - get
   - list
