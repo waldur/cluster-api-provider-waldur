@@ -20,6 +20,7 @@ import (
 	"context"
 
 	uuid "github.com/google/uuid"
+	openapitypes "github.com/oapi-codegen/runtime/types"
 	"github.com/pkg/errors"
 	infrastructurev1beta2 "github.com/sergei-zaiaev/cluster-api-provider-waldur/api/v1beta2"
 	waldurclient "github.com/waldur/go-client"
@@ -105,6 +106,18 @@ func getOffering(ctx context.Context, waldur waldurclient.ClientWithResponses, o
 	}
 
 	return &offerings[0], nil
+}
+
+// getOffering looks up a Waldur marketplace offering by UUID.
+func getOfferingByUUID(ctx context.Context, waldur waldurclient.ClientWithResponses, offeringUuid openapitypes.UUID) (*waldurclient.PublicOfferingDetails, error) {
+	offeringResponse, err := waldur.MarketplacePublicOfferingsRetrieveWithResponse(ctx, offeringUuid, &waldurclient.MarketplacePublicOfferingsRetrieveParams{})
+	if err != nil {
+		return nil, err
+	}
+
+	offering := *offeringResponse.JSON200
+
+	return &offering, nil
 }
 
 // getMarketplaceResource fetches a Waldur marketplace resource by its UUID string.

@@ -1,6 +1,6 @@
 module github.com/sergei-zaiaev/cluster-api-provider-waldur
 
-go 1.25.3
+go 1.26.1
 
 require (
 	github.com/google/uuid v1.6.0

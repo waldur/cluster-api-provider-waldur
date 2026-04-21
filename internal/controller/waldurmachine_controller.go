@@ -32,7 +32,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	util "sigs.k8s.io/cluster-api/util"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -44,6 +43,14 @@ import (
 const machineFinalizer = "waldurmachine.infrastructure.cluster.waldur.com/finalizer"
 
 var errBootstrapNotReady = errors.New("bootstrap secret not ready")
+
+// ptrStr safely dereferences a *string for logging; returns "<nil>" if nil.
+func ptrStr(s *string) string {
+	if s == nil {
+		return "<nil>"
+	}
+	return *s
+}
 
 // WaldurMachineReconciler reconciles a WaldurMachine object
 type WaldurMachineReconciler struct {
@@ -63,13 +70,6 @@ type WaldurMachineReconciler struct {
 	OperatorNamespace string
 }
 
-// +kubebuilder:rbac:groups=infrastructure.cluster.waldur.com,resources=waldurmachines,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=infrastructure.cluster.waldur.com,resources=waldurmachines/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=infrastructure.cluster.waldur.com,resources=waldurmachines/finalizers,verbs=update
-// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines;machines/status,verbs=get;list;watch
-// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters;clusters/status,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 func (r *WaldurMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
@@ -245,6 +245,7 @@ func (r *WaldurMachineReconciler) buildOrderPayload(
 	waldurCluster *infrastructurev1beta2.WaldurCluster,
 	userData *string,
 ) (waldurclient.MarketplaceOrdersCreateJSONRequestBody, error) {
+	log := logf.FromContext(ctx)
 	tenant, ok := waldurCluster.Status.Tenants[waldurMachine.Spec.OfferingSlug]
 	if !ok {
 		return waldurclient.MarketplaceOrdersCreateJSONRequestBody{}, errors.Errorf("tenant for offering %q not found in WaldurCluster status", waldurMachine.Spec.OfferingSlug)
@@ -272,11 +273,21 @@ func (r *WaldurMachineReconciler) buildOrderPayload(
 	if err != nil {
 		return waldurclient.MarketplaceOrdersCreateJSONRequestBody{}, errors.Wrap(err, "unable to get parent offering")
 	}
+	log.Info("[DEV] tenant offering", "name", ptrStr(parentOffering.Name), "uuid", parentOffering.Uuid, "url", ptrStr(parentOffering.Url))
 
-	offering, err := r.getVMOffering(ctx, parentOffering)
+	subresourceOffering, err := r.getVMOffering(ctx, tenant.MarketplaceResourceUuid)
+	if err != nil {
+		return waldurclient.MarketplaceOrdersCreateJSONRequestBody{}, errors.Wrap(err, "unable to get VM subresource offering")
+	}
+
+	log.Info("[DEV] Subresource VM offering", "uuid", subresourceOffering.Uuid)
+
+	offering, err := getOfferingByUUID(ctx, r.Waldur, *subresourceOffering.Uuid)
 	if err != nil {
 		return waldurclient.MarketplaceOrdersCreateJSONRequestBody{}, errors.Wrap(err, "unable to get VM offering")
 	}
+
+	log.Info("[DEV] VM offering", "URL", offering.Url)
 
 	tenantUuid, err := uuid.Parse(*tenant.Uuid)
 	if err != nil {
@@ -297,9 +308,13 @@ func (r *WaldurMachineReconciler) buildOrderPayload(
 	if err != nil {
 		return waldurclient.MarketplaceOrdersCreateJSONRequestBody{}, errors.Wrap(err, "unable to get security groups")
 	}
+	log.Info("[DEV] security groups", "count", len(securityGroups))
 	sgRequests := make([]waldurclient.OpenStackSecurityGroupHyperlinkRequest, 0, len(securityGroups))
+
+	defaultSecGroupName := "default"
 	for _, sg := range securityGroups {
-		if sg.Url != nil {
+		log.Info("[DEV] security group", "name", ptrStr(sg.Name), "url", ptrStr(sg.Url), "tenantName", ptrStr(sg.TenantName), "tenantUuid", sg.TenantUuid)
+		if sg.Url != nil && *sg.Name == defaultSecGroupName {
 			sgRequests = append(sgRequests, waldurclient.OpenStackSecurityGroupHyperlinkRequest{Url: *sg.Url})
 		}
 	}
@@ -330,6 +345,8 @@ func (r *WaldurMachineReconciler) buildOrderPayload(
 		FloatingIps:    &floatingIps,
 		UserData:       userData,
 	}
+
+	log.Info("[DEV] instance cloud-init", "user-data", userData)
 	if waldurMachine.Spec.SystemDiskSize != nil {
 		systemSizeMiB := *waldurMachine.Spec.SystemDiskSize * 1024
 		rawAttrs.SystemVolumeSize = &systemSizeMiB
@@ -415,7 +432,7 @@ func (r *WaldurMachineReconciler) refreshVM(ctx context.Context, waldurMachine *
 	}
 
 	if waldurMachine.Status.State == waldurclient.CoreStatesOK {
-		waldurMachine.Status.Initialization = &infrastructurev1beta2.WaldurMachineInitialization{Provisioned: ptr.To(true)}
+		waldurMachine.Status.Initialization = &infrastructurev1beta2.WaldurMachineInitialization{Provisioned: new(true)}
 	}
 
 	return nil
@@ -508,18 +525,18 @@ func (r *WaldurMachineReconciler) buildUserDataWithVault(ctx context.Context, ma
 	roleID := string(vaultConfigSecret.Data["role_id"])
 
 	// Idempotent: the first node writes the token; subsequent nodes skip the write.
-	tokenPath := secretPath + "/join-token"
-	exists, err := r.VaultClient.SecretExists(ctx, tokenPath)
+	// secretPath is the full KV v2 path (e.g. "secret/data/rke2/<clusterName>/join-token").
+  	exists, err := r.VaultClient.SecretExists(ctx, secretPath)
 	if err != nil {
 		return "", "", "", errors.Wrap(err, "failed to check if RKE2 token exists in Vault")
 	}
 	if !exists {
-		log.Info("Writing RKE2 token to Vault", "path", tokenPath)
-		if err := r.VaultClient.WriteSecret(ctx, tokenPath, map[string]string{"token": rke2Token}); err != nil {
+		log.Info("Writing RKE2 token to Vault", "path", secretPath)
+		if err := r.VaultClient.WriteSecret(ctx, secretPath, map[string]string{"token": rke2Token}); err != nil {
 			return "", "", "", errors.Wrap(err, "failed to write RKE2 token to Vault")
 		}
 	} else {
-		log.Info("RKE2 token already in Vault, skipping write", "path", tokenPath)
+		log.Info("RKE2 token already in Vault, skipping write", "path", secretPath)
 	}
 
 	// Generate a single-use secret_id for this node's boot-time Vault login.
@@ -547,28 +564,31 @@ func (r *WaldurMachineReconciler) buildUserDataWithVault(ctx context.Context, ma
 	return userData, secretID, roleName, nil
 }
 
-func (r *WaldurMachineReconciler) getVMOffering(ctx context.Context, parentOffering *waldurclient.PublicOfferingDetails) (*waldurclient.PublicOfferingDetails, error) {
-	params := waldurclient.MarketplacePublicOfferingsListParams{
-		Type:       &[]string{"OpenStack.Instance"},
-		ParentUuid: parentOffering.Uuid,
+func (r *WaldurMachineReconciler) getVMOffering(ctx context.Context, tenantMarketplaceUuid string) (*waldurclient.SubresourceOffering, error) {
+	tenantMPUuid, err := uuid.Parse(tenantMarketplaceUuid)
+	if err != nil {
+		return nil, err
 	}
-	offeringsResponse, err := r.Waldur.MarketplacePublicOfferingsListWithResponse(ctx, &params)
+
+	offeringsResponse, err := r.Waldur.MarketplaceResourcesOfferingForSubresourcesListWithResponse(ctx, tenantMPUuid)
 
 	if err != nil {
 		return nil, err
 	}
 
 	if offeringsResponse.StatusCode() != 200 {
-		return nil, errors.Errorf("Unable to list VM offerings for the parent offering %s, code %d, reason %s", *parentOffering.Name, offeringsResponse.StatusCode(), string(offeringsResponse.Body))
+		return nil, errors.Errorf("Unable to list subresource offerings for the marketplace resource %s, code %d, reason %s", tenantMPUuid, offeringsResponse.StatusCode(), string(offeringsResponse.Body))
 	}
 
 	offerings := *offeringsResponse.JSON200
 
-	if len(offerings) == 0 {
-		return nil, errors.Errorf("Unable to find a VM offering for the parent offering %s, list is empty", *parentOffering.Name)
-	} else {
-		return &offerings[0], nil
+	for _, offering := range offerings {
+		if *offering.Type == "OpenStack.Instance" {
+			return &offering, nil
+		}
 	}
+
+	return nil, errors.Errorf("Unable to find a VM offering for the marketplace resource offering %s, list is empty", tenantMPUuid)
 }
 
 func (r *WaldurMachineReconciler) setMachineReadyCondition(waldurMachine *infrastructurev1beta2.WaldurMachine) {

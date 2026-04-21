@@ -5,10 +5,21 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - cluster.x-k8s.io
   resources:
   - clusters
   - clusters/status
+  - machines
+  - machines/status
   verbs:
   - get
   - list
@@ -17,6 +28,7 @@ rules:
   - infrastructure.cluster.waldur.com
   resources:
   - waldurclusters
+  - waldurmachines
   verbs:
   - create
   - delete
@@ -29,12 +41,14 @@ rules:
   - infrastructure.cluster.waldur.com
   resources:
   - waldurclusters/finalizers
+  - waldurmachines/finalizers
   verbs:
   - update
 - apiGroups:
   - infrastructure.cluster.waldur.com
   resources:
   - waldurclusters/status
+  - waldurmachines/status
   verbs:
   - get
   - patch

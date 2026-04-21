@@ -225,7 +225,7 @@ func (r *WaldurClusterReconciler) refreshTenant(ctx context.Context, existing *i
 	if refreshed.Name != nil {
 		existing.Name = *refreshed.Name
 	}
-	existing.Uuid = ptr.To(tenantUuid.String())
+	existing.Uuid = new(tenantUuid.String())
 
 	if existing.State != prevState {
 		log.Info("Tenant state changed", "tenant", existing.Name, "state", existing.State, "marketplaceResourceState", existing.MarketplaceResourceState)
@@ -444,6 +444,12 @@ func (r *WaldurClusterReconciler) reconcileDelete(ctx context.Context, waldurClu
 // +kubebuilder:rbac:groups=infrastructure.cluster.waldur.com,resources=waldurclusters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=infrastructure.cluster.waldur.com,resources=waldurclusters/finalizers,verbs=update
 // +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters;clusters/status,verbs=get;list;watch
+// +kubebuilder:rbac:groups=infrastructure.cluster.waldur.com,resources=waldurmachines,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=infrastructure.cluster.waldur.com,resources=waldurmachines/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=infrastructure.cluster.waldur.com,resources=waldurmachines/finalizers,verbs=update
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines;machines/status,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -542,7 +548,7 @@ func (r *WaldurClusterReconciler) setReadyCondition(waldurCluster *infrastructur
 			Reason:  "Provisioning",
 			Message: "Waiting for tenants to be created",
 		})
-		waldurCluster.Status.Initialization = &infrastructurev1beta2.WaldurClusterInitialization{Provisioned: ptr.To(false)}
+		waldurCluster.Status.Initialization = &infrastructurev1beta2.WaldurClusterInitialization{Provisioned: new(false)}
 	case anyTenantPending(waldurCluster.Status.Tenants):
 		meta.SetStatusCondition(&waldurCluster.Status.Conditions, metav1.Condition{
 			Type:    "Ready",
@@ -550,7 +556,7 @@ func (r *WaldurClusterReconciler) setReadyCondition(waldurCluster *infrastructur
 			Reason:  "Provisioning",
 			Message: "Waiting for tenants to be provisioned",
 		})
-		waldurCluster.Status.Initialization = &infrastructurev1beta2.WaldurClusterInitialization{Provisioned: ptr.To(false)}
+		waldurCluster.Status.Initialization = &infrastructurev1beta2.WaldurClusterInitialization{Provisioned: new(false)}
 	case anyTenantErred(waldurCluster.Status.Tenants):
 		meta.SetStatusCondition(&waldurCluster.Status.Conditions, metav1.Condition{
 			Type:    "Ready",
@@ -558,7 +564,7 @@ func (r *WaldurClusterReconciler) setReadyCondition(waldurCluster *infrastructur
 			Reason:  "ProvisioningFailed",
 			Message: "One or more tenants failed to provision",
 		})
-		waldurCluster.Status.Initialization = &infrastructurev1beta2.WaldurClusterInitialization{Provisioned: ptr.To(false)}
+		waldurCluster.Status.Initialization = &infrastructurev1beta2.WaldurClusterInitialization{Provisioned: new(false)}
 	default:
 		meta.SetStatusCondition(&waldurCluster.Status.Conditions, metav1.Condition{
 			Type:    "Ready",
@@ -566,7 +572,7 @@ func (r *WaldurClusterReconciler) setReadyCondition(waldurCluster *infrastructur
 			Reason:  "Provisioned",
 			Message: "All tenants are ready",
 		})
-		waldurCluster.Status.Initialization = &infrastructurev1beta2.WaldurClusterInitialization{Provisioned: ptr.To(true)}
+		waldurCluster.Status.Initialization = &infrastructurev1beta2.WaldurClusterInitialization{Provisioned: new(true)}
 	}
 }
 
