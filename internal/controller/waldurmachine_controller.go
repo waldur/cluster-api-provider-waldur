@@ -526,7 +526,7 @@ func (r *WaldurMachineReconciler) buildUserDataWithVault(ctx context.Context, ma
 
 	// Idempotent: the first node writes the token; subsequent nodes skip the write.
 	// secretPath is the full KV v2 path (e.g. "secret/data/rke2/<clusterName>/join-token").
-  	exists, err := r.VaultClient.SecretExists(ctx, secretPath)
+	exists, err := r.VaultClient.SecretExists(ctx, secretPath)
 	if err != nil {
 		return "", "", "", errors.Wrap(err, "failed to check if RKE2 token exists in Vault")
 	}
