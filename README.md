@@ -1,5 +1,6 @@
 # cluster-api-provider-waldur
-// TODO(user): Add simple overview of use/purpose
+
+CAPI infrastructure Waldur Provider
 
 ## Description
 // TODO(user): An in-depth paragraph about your project and overview of use
