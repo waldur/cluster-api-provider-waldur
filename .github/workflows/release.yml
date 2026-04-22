@@ -58,9 +58,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install kustomize
-        uses: kubernetes-sigs/setup-kustomize@v1
-
       - name: Generate install.yaml
         run: make build-installer IMG=${{ needs.build-and-push.outputs.image }}
 
