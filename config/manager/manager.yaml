@@ -72,27 +72,37 @@ spec:
             secretKeyRef:
               name: waldur-api-secret
               key: URL
+              optional: true
         - name: WALDUR_API_TOKEN
           valueFrom:
             secretKeyRef:
               name: waldur-api-secret
               key: TOKEN
+              optional: true
         - name: POD_NAMESPACE
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        # VAULT_ADDR and VAULT_K8S_ROLE are optional.
-        # When VAULT_ADDR is unset the controller passes bootstrap cloud-init verbatim
-        # and the RKE2 join token will appear in Waldur's user_data store.
-        # Uncomment and set these to enable Vault integration:
-        #- name: VAULT_ADDR
-        #  value: "https://vault.example.com:8200"
-        #- name: VAULT_K8S_ROLE
-        #  value: "waldur-capi-controller"
-        # BASE_TEMPLATE_CONFIGMAP is optional. Set to the name of a ConfigMap in the
-        # operator namespace containing a cloud-init.yaml key with static OS sections.
-        #- name: BASE_TEMPLATE_CONFIGMAP
-        #  value: "cloud-init-base"
+        # VAULT_ADDR and VAULT_K8S_ROLE are optional — Vault integration is disabled when absent.
+        - name: VAULT_ADDR
+          valueFrom:
+            configMapKeyRef:
+              name: waldur-controller-config
+              key: VAULT_ADDR
+              optional: true
+        - name: VAULT_K8S_ROLE
+          valueFrom:
+            configMapKeyRef:
+              name: waldur-controller-config
+              key: VAULT_K8S_ROLE
+              optional: true
+        # BASE_TEMPLATE_CONFIGMAP is optional. Set to the name of a ConfigMap containing a cloud-init.yaml key.
+        - name: BASE_TEMPLATE_CONFIGMAP
+          valueFrom:
+            configMapKeyRef:
+              name: waldur-controller-config
+              key: BASE_TEMPLATE_CONFIGMAP
+              optional: true
         securityContext:
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false
