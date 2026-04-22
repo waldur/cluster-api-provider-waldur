@@ -954,7 +954,7 @@ spec:
               key: BASE_TEMPLATE_CONFIGMAP
               name: cluster-api-provider-waldur-waldur-controller-config
               optional: true
-        image: ghcr.io/waldur/cluster-api-provider-waldur:v0.1.0
+        image: ghcr.io/waldur/cluster-api-provider-waldur:0.1.0
         livenessProbe:
           httpGet:
             path: /healthz

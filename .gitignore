@@ -32,3 +32,5 @@ go.work
 # Credential env files — never commit
 config/manager/waldur-api-secret.env
 config/manager/waldur-controller-config.env
+
+*.DS_Store
