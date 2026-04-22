@@ -4,6 +4,7 @@ metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: cluster-api-provider-waldur
+    cluster.x-k8s.io/provider: infrastructure-waldur
     control-plane: controller-manager
   name: cluster-api-provider-waldur-system
 ---
@@ -849,6 +850,8 @@ data:
   VAULT_K8S_ROLE: waldur-capi-controller
 kind: ConfigMap
 metadata:
+  labels:
+    cluster.x-k8s.io/provider: infrastructure-waldur
   name: cluster-api-provider-waldur-waldur-controller-config
   namespace: cluster-api-provider-waldur-system
 ---
@@ -858,6 +861,8 @@ data:
   URL: aHR0cDovL2hvc3QuZG9ja2VyLmludGVybmFsOjEwNzgwLw==
 kind: Secret
 metadata:
+  labels:
+    cluster.x-k8s.io/provider: infrastructure-waldur
   name: cluster-api-provider-waldur-waldur-api-secret
   namespace: cluster-api-provider-waldur-system
 type: Opaque
@@ -887,6 +892,7 @@ metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: cluster-api-provider-waldur
+    cluster.x-k8s.io/provider: infrastructure-waldur
     control-plane: controller-manager
   name: cluster-api-provider-waldur-controller-manager
   namespace: cluster-api-provider-waldur-system
@@ -895,6 +901,7 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: cluster-api-provider-waldur
+      cluster.x-k8s.io/provider: infrastructure-waldur
       control-plane: controller-manager
   template:
     metadata:
@@ -902,6 +909,7 @@ spec:
         kubectl.kubernetes.io/default-container: manager
       labels:
         app.kubernetes.io/name: cluster-api-provider-waldur
+        cluster.x-k8s.io/provider: infrastructure-waldur
         control-plane: controller-manager
     spec:
       containers:

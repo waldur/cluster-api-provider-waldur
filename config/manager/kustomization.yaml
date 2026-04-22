@@ -18,3 +18,7 @@ images:
 - name: controller
   newName: ghcr.io/waldur/cluster-api-provider-waldur
   newTag: v0.1.0
+labels:
+  - includeSelectors: true
+    pairs:
+      cluster.x-k8s.io/provider: infrastructure-waldur
