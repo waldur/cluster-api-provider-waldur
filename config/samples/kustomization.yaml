@@ -1,0 +1,5 @@
+## Append samples of your project ##
+resources:
+- infrastructure_v1alpha1_waldurcluster.yaml
+- infrastructure_v1alpha1_waldurmachine.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

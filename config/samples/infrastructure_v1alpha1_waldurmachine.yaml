@@ -1,0 +1,9 @@
+apiVersion: infrastructure.cluster.waldur.com/v1beta2
+kind: WaldurMachine
+metadata:
+  labels:
+    app.kubernetes.io/name: cluster-api-provider-waldur
+    app.kubernetes.io/managed-by: kustomize
+  name: waldurmachine-sample
+spec:
+  # TODO(user): Add fields here
