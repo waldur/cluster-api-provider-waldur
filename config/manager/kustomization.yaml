@@ -16,5 +16,5 @@ configMapGenerator:
     disableNameSuffixHash: true
 images:
 - name: controller
-  newName: cluster-api-provider-waldur
-  newTag: dev4
+  newName: ghcr.io/waldur/cluster-api-provider-waldur
+  newTag: v0.1.0
