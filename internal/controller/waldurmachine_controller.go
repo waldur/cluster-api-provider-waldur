@@ -23,8 +23,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
-	infrastructurev1beta2 "github.com/sergei-zaiaev/cluster-api-provider-waldur/api/v1beta2"
-	vaultpkg "github.com/sergei-zaiaev/cluster-api-provider-waldur/internal/vault"
+	infrastructurev1beta2 "github.com/waldur/cluster-api-provider-waldur/api/v1beta2"
+	vaultpkg "github.com/waldur/cluster-api-provider-waldur/internal/vault"
 	waldurclient "github.com/waldur/go-client"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"

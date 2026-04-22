@@ -1,4 +1,4 @@
-module github.com/sergei-zaiaev/cluster-api-provider-waldur
+module github.com/waldur/cluster-api-provider-waldur
 
 go 1.26.1
 

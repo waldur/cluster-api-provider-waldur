@@ -22,7 +22,7 @@ import (
 	uuid "github.com/google/uuid"
 	openapitypes "github.com/oapi-codegen/runtime/types"
 	"github.com/pkg/errors"
-	infrastructurev1beta2 "github.com/sergei-zaiaev/cluster-api-provider-waldur/api/v1beta2"
+	infrastructurev1beta2 "github.com/waldur/cluster-api-provider-waldur/api/v1beta2"
 	waldurclient "github.com/waldur/go-client"
 )
 

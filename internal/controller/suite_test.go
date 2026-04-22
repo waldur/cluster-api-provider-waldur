@@ -33,7 +33,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	infrastructurev1beta2 "github.com/sergei-zaiaev/cluster-api-provider-waldur/api/v1beta2"
+	infrastructurev1beta2 "github.com/waldur/cluster-api-provider-waldur/api/v1beta2"
 	// +kubebuilder:scaffold:imports
 )
 

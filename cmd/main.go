@@ -38,9 +38,9 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	infrastructurev1beta2 "github.com/sergei-zaiaev/cluster-api-provider-waldur/api/v1beta2"
-	"github.com/sergei-zaiaev/cluster-api-provider-waldur/internal/controller"
-	vaultpkg "github.com/sergei-zaiaev/cluster-api-provider-waldur/internal/vault"
+	infrastructurev1beta2 "github.com/waldur/cluster-api-provider-waldur/api/v1beta2"
+	"github.com/waldur/cluster-api-provider-waldur/internal/controller"
+	vaultpkg "github.com/waldur/cluster-api-provider-waldur/internal/vault"
 
 	// +kubebuilder:scaffold:imports
 

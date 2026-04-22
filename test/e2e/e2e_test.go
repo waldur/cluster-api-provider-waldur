@@ -30,7 +30,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/sergei-zaiaev/cluster-api-provider-waldur/test/utils"
+	"github.com/waldur/cluster-api-provider-waldur/test/utils"
 )
 
 // namespace where the project is deployed in
