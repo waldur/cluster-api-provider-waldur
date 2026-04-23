@@ -3,7 +3,7 @@
 CAPI infrastructure Waldur Provider
 
 ## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+A [Cluster API](https://cluster-api.sigs.k8s.io/) infrastructure provider for [Waldur](https://waldur.com/), enabling declarative provisioning of Kubernetes clusters on Waldur-managed OpenStack infrastructure. The provider implements the CAPI v1beta2 contract and integrates with [Rancher Turtles](https://turtles.docs.rancher.com/) for multi-cluster lifecycle management. Optionally integrates with HashiCorp Vault to securely deliver RKE2 join tokens to nodes at boot without exposing credentials in Waldur's user-data store.
 
 ## Getting Started
 
