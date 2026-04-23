@@ -286,7 +286,14 @@ func main() {
 				Namespace: operatorNamespace,
 				Name:      vaultAppRoleSecret,
 			}, secret); err != nil {
-				setupLog.Error(err, "Failed to read Vault AppRole secret", "namespace", operatorNamespace, "name", vaultAppRoleSecret)
+				setupLog.Error(
+					err,
+					"Failed to read Vault AppRole secret",
+					"namespace",
+					operatorNamespace,
+					"name",
+					vaultAppRoleSecret,
+				)
 				os.Exit(1)
 			}
 			roleID := string(secret.Data["role_id"])

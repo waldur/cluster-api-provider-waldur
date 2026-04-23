@@ -80,8 +80,8 @@ type client struct {
 	method authMethod
 
 	// Kubernetes auth fields
-	k8sAuthPath string
-	k8sRole     string
+	k8sAuthPath  string
+	k8sRole      string
 	k8sTokenPath string
 
 	// AppRole auth fields
