@@ -1,0 +1,9 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+  labels:
+    # Aggregates waldur resources into the CAPI core aggregated manager role so that
+    # the capi-manager service account can list/watch WaldurCluster and WaldurMachine.
+    # Without this label the CAPI cluster controller cannot set OwnerRefs on provider objects.
+    cluster.x-k8s.io/aggregate-to-manager: "true"
