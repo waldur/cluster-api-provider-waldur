@@ -20,7 +20,7 @@ jobs:
       packages: write
 
     outputs:
-      image: ${{ steps.meta.outputs.tags }}
+      image: ${{ steps.tag.outputs.img }}
 
     steps:
       - name: Checkout
