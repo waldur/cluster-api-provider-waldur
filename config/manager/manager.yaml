@@ -83,13 +83,23 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        # VAULT_ADDR and VAULT_K8S_ROLE are optional — Vault integration is disabled when absent.
+        # VAULT_ADDR enables Vault integration. Auth method is AppRole by default.
+        # Set VAULT_K8S_ROLE to use Kubernetes auth instead (requires Vault to reach port 6443).
         - name: VAULT_ADDR
           valueFrom:
             configMapKeyRef:
               name: waldur-controller-config
               key: VAULT_ADDR
               optional: true
+        # VAULT_APPROLE_SECRET: name of K8s Secret holding role_id and secret_id for AppRole auth.
+        # Defaults to "waldur-vault-approle" when unset. Mutually exclusive with VAULT_K8S_ROLE.
+        - name: VAULT_APPROLE_SECRET
+          valueFrom:
+            configMapKeyRef:
+              name: waldur-controller-config
+              key: VAULT_APPROLE_SECRET
+              optional: true
+        # VAULT_K8S_ROLE: opt-in Kubernetes auth. Requires Vault to reach the cluster API on port 6443.
         - name: VAULT_K8S_ROLE
           valueFrom:
             configMapKeyRef:

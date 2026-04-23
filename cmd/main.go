@@ -253,24 +253,63 @@ func main() {
 	}
 
 	// Initialize Vault client (optional — disabled when VAULT_ADDR is unset).
+	// Auth method selection:
+	//   - Default (AppRole): reads role_id/secret_id from the K8s Secret named by VAULT_APPROLE_SECRET
+	//     (default Secret name: "waldur-vault-approle"). Works across network boundaries.
+	//   - Kubernetes auth (opt-in): set VAULT_K8S_ROLE. Requires Vault to reach the cluster's
+	//     Kubernetes API server on port 6443. VAULT_K8S_ROLE and VAULT_APPROLE_SECRET are mutually exclusive.
 	var vaultClient vaultpkg.Client
 	vaultAddr := os.Getenv("VAULT_ADDR")
 	if vaultAddr != "" {
-		// The role used by the controller to interact with Vault
-		vaultRole := os.Getenv("VAULT_K8S_ROLE")
-		if vaultRole == "" {
-			vaultRole = "waldur-capi-controller"
+		vaultK8sRole := os.Getenv("VAULT_K8S_ROLE")
+		vaultAppRoleSecret := os.Getenv("VAULT_APPROLE_SECRET")
+		if vaultAppRoleSecret == "" {
+			vaultAppRoleSecret = "waldur-vault-approle"
 		}
-		vc, err := vaultpkg.NewClient(vaultpkg.Config{
-			Addr: vaultAddr,
-			Role: vaultRole,
-		})
-		if err != nil {
-			setupLog.Error(err, "Failed to initialize Vault client", "addr", vaultAddr)
-			os.Exit(1)
+
+		if vaultK8sRole != "" {
+			// Kubernetes auth — opt-in when VAULT_K8S_ROLE is explicitly set.
+			vc, err := vaultpkg.NewClient(vaultpkg.Config{
+				Addr: vaultAddr,
+				Role: vaultK8sRole,
+			})
+			if err != nil {
+				setupLog.Error(err, "Failed to initialize Vault client (kubernetes auth)", "addr", vaultAddr, "role", vaultK8sRole)
+				os.Exit(1)
+			}
+			vaultClient = vc
+			setupLog.Info("Vault client initialized (kubernetes auth)", "addr", vaultAddr, "role", vaultK8sRole)
+		} else {
+			// AppRole auth — default. Read credentials from a K8s Secret in the operator namespace.
+			secret := &corev1.Secret{}
+			if err := mgr.GetAPIReader().Get(context.Background(), types.NamespacedName{
+				Namespace: operatorNamespace,
+				Name:      vaultAppRoleSecret,
+			}, secret); err != nil {
+				setupLog.Error(
+					err,
+					"Failed to read Vault AppRole secret",
+					"namespace",
+					operatorNamespace,
+					"name",
+					vaultAppRoleSecret,
+				)
+				os.Exit(1)
+			}
+			roleID := string(secret.Data["role_id"])
+			secretID := string(secret.Data["secret_id"])
+			if roleID == "" || secretID == "" {
+				setupLog.Error(nil, "Vault AppRole secret must contain non-empty role_id and secret_id", "name", vaultAppRoleSecret)
+				os.Exit(1)
+			}
+			vc, err := vaultpkg.NewClientWithAppRole(vaultAddr, roleID, secretID)
+			if err != nil {
+				setupLog.Error(err, "Failed to initialize Vault client (approle auth)", "addr", vaultAddr)
+				os.Exit(1)
+			}
+			vaultClient = vc
+			setupLog.Info("Vault client initialized (approle auth)", "addr", vaultAddr, "secret", vaultAppRoleSecret)
 		}
-		vaultClient = vc
-		setupLog.Info("Vault client initialized", "addr", vaultAddr, "role", vaultRole)
 	} else {
 		setupLog.Info("VAULT_ADDR not set — Vault integration disabled; RKE2 token will appear in user_data")
 	}

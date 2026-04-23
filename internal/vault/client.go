@@ -17,9 +17,14 @@ limitations under the License.
 // Package vault provides a lightweight Vault client for the WaldurMachine controller.
 // It uses plain net/http with Vault's REST API — no external Vault SDK required.
 //
-// The controller authenticates to Vault via the Kubernetes auth method: the pod's
-// ServiceAccount token is exchanged for a short-lived Vault token at startup. The
-// token is stored in memory and refreshed on 401/403 responses.
+// Two authentication methods are supported:
+//   - AppRole (default): role_id and secret_id are passed directly; no Kubernetes API
+//     server access is required from Vault. Use NewClientWithAppRole.
+//   - Kubernetes auth: the pod's ServiceAccount JWT is exchanged for a Vault token.
+//     Requires Vault to reach the cluster's TokenReview API (port 6443). Use NewClient.
+//
+// In both cases the acquired Vault token is stored in memory and refreshed automatically
+// on 401/403 responses.
 package vault
 
 import (
@@ -35,6 +40,13 @@ import (
 
 const defaultTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 
+type authMethod int
+
+const (
+	authMethodAppRole    authMethod = iota // default
+	authMethodKubernetes authMethod = iota
+)
+
 // Client defines the Vault operations required by the WaldurMachine controller.
 type Client interface {
 	// SecretExists reports whether a KV v2 secret exists at the given logical path.
@@ -47,7 +59,7 @@ type Client interface {
 	RevokeSecretID(ctx context.Context, roleName, secretID string) error
 }
 
-// Config holds the configuration for connecting to Vault.
+// Config holds the configuration for Kubernetes auth.
 type Config struct {
 	// Addr is the Vault server address, e.g. "https://vault.example.com:8200".
 	Addr string
@@ -61,12 +73,25 @@ type Config struct {
 }
 
 type client struct {
-	cfg        Config
+	addr       string
 	httpClient *http.Client
 	vaultToken string
+
+	method authMethod
+
+	// Kubernetes auth fields
+	k8sAuthPath  string
+	k8sRole      string
+	k8sTokenPath string
+
+	// AppRole auth fields
+	appRoleID   string
+	appSecretID string
 }
 
-// NewClient creates a Vault client and authenticates using the Kubernetes auth method.
+// NewClient creates a Vault client that authenticates using the Kubernetes auth method.
+// Vault must be able to reach the cluster's Kubernetes API server (port 6443) to validate
+// the pod's ServiceAccount JWT via TokenReview.
 func NewClient(cfg Config) (Client, error) {
 	if cfg.AuthPath == "" {
 		cfg.AuthPath = "auth/kubernetes"
@@ -76,8 +101,12 @@ func NewClient(cfg Config) (Client, error) {
 	}
 
 	c := &client{
-		cfg:        cfg,
-		httpClient: &http.Client{},
+		addr:         cfg.Addr,
+		httpClient:   &http.Client{},
+		method:       authMethodKubernetes,
+		k8sAuthPath:  cfg.AuthPath,
+		k8sRole:      cfg.Role,
+		k8sTokenPath: cfg.TokenPath,
 	}
 
 	if err := c.login(); err != nil {
@@ -86,19 +115,46 @@ func NewClient(cfg Config) (Client, error) {
 	return c, nil
 }
 
-// login exchanges the pod ServiceAccount JWT for a Vault token.
+// NewClientWithAppRole creates a Vault client that authenticates using the AppRole auth method.
+// This does not require Vault to reach the Kubernetes API server — it works across network
+// boundaries. The roleID and secretID are long-lived controller credentials stored in a
+// Kubernetes Secret in the provider namespace.
+func NewClientWithAppRole(addr, roleID, secretID string) (Client, error) {
+	c := &client{
+		addr:        addr,
+		httpClient:  &http.Client{},
+		method:      authMethodAppRole,
+		appRoleID:   roleID,
+		appSecretID: secretID,
+	}
+
+	if err := c.login(); err != nil {
+		return nil, fmt.Errorf("vault: approle auth login failed: %w", err)
+	}
+	return c, nil
+}
+
+// login dispatches to the appropriate auth method.
 func (c *client) login() error {
-	jwt, err := os.ReadFile(c.cfg.TokenPath)
+	if c.method == authMethodAppRole {
+		return c.loginWithAppRole()
+	}
+	return c.loginWithKubernetes()
+}
+
+// loginWithKubernetes exchanges the pod ServiceAccount JWT for a Vault token.
+func (c *client) loginWithKubernetes() error {
+	jwt, err := os.ReadFile(c.k8sTokenPath)
 	if err != nil {
 		return fmt.Errorf("vault: unable to read service account token: %w", err)
 	}
 
 	body, _ := json.Marshal(map[string]string{
-		"role": c.cfg.Role,
+		"role": c.k8sRole,
 		"jwt":  string(jwt),
 	})
 
-	url := fmt.Sprintf("%s/v1/%s/login", c.cfg.Addr, c.cfg.AuthPath)
+	url := fmt.Sprintf("%s/v1/%s/login", c.addr, c.k8sAuthPath)
 	resp, err := c.httpClient.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("vault: kubernetes auth request failed: %w", err)
@@ -110,16 +166,42 @@ func (c *client) login() error {
 		return fmt.Errorf("vault: kubernetes auth returned %d: %s", resp.StatusCode, string(b))
 	}
 
+	return c.extractToken(resp.Body)
+}
+
+// loginWithAppRole authenticates to Vault using the AppRole method.
+func (c *client) loginWithAppRole() error {
+	body, _ := json.Marshal(map[string]string{
+		"role_id":   c.appRoleID,
+		"secret_id": c.appSecretID,
+	})
+
+	url := fmt.Sprintf("%s/v1/auth/approle/login", c.addr)
+	resp, err := c.httpClient.Post(url, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("vault: approle auth request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("vault: approle auth returned %d: %s", resp.StatusCode, string(b))
+	}
+
+	return c.extractToken(resp.Body)
+}
+
+func (c *client) extractToken(body io.Reader) error {
 	var result struct {
 		Auth struct {
 			ClientToken string `json:"client_token"`
 		} `json:"auth"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(body).Decode(&result); err != nil {
 		return fmt.Errorf("vault: failed to decode auth response: %w", err)
 	}
 	if result.Auth.ClientToken == "" {
-		return fmt.Errorf("vault: kubernetes auth returned empty token")
+		return fmt.Errorf("vault: auth response contained empty token")
 	}
 	c.vaultToken = result.Auth.ClientToken
 	return nil
@@ -151,7 +233,7 @@ func (c *client) doOnce(ctx context.Context, method, path string, body any) (*ht
 		bodyReader = bytes.NewReader(b)
 	}
 
-	url := fmt.Sprintf("%s/v1/%s", c.cfg.Addr, strings.TrimPrefix(path, "/"))
+	url := fmt.Sprintf("%s/v1/%s", c.addr, strings.TrimPrefix(path, "/"))
 	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
 	if err != nil {
 		return nil, err
