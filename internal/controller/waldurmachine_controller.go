@@ -32,8 +32,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
-	util "sigs.k8s.io/cluster-api/util"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -96,24 +95,32 @@ func (r *WaldurMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
-	// Get the owner Machine
-	machine, err := util.GetOwnerMachine(ctx, r.Client, waldurMachine.ObjectMeta)
-	if err != nil {
-		return ctrl.Result{}, err
+	// Get the owner Machine via ownerReferences (avoids util.GetOwnerMachine which uses v1beta2).
+	var machineName string
+	for _, ref := range waldurMachine.OwnerReferences {
+		if ref.Kind == "Machine" {
+			machineName = ref.Name
+			break
+		}
 	}
-	if machine == nil {
+	if machineName == "" {
 		log.Info("Waiting for Machine Controller to set OwnerRef on WaldurMachine")
 		return ctrl.Result{}, nil
 	}
-
-	// Get the owner Cluster from the Machine
-	cluster, err := util.GetClusterFromMetadata(ctx, r.Client, machine.ObjectMeta)
-	if err != nil {
-		return ctrl.Result{}, err
+	machine := &clusterv1.Machine{}
+	if err := r.Get(ctx, types.NamespacedName{Namespace: waldurMachine.Namespace, Name: machineName}, machine); err != nil {
+		return ctrl.Result{}, errors.Wrap(err, "unable to get owner Machine")
 	}
-	if cluster == nil {
+
+	// Get the owner Cluster via label (avoids util.GetClusterFromMetadata which uses v1beta2).
+	clusterName := machine.Labels[clusterv1.ClusterNameLabel]
+	if clusterName == "" {
 		log.Info("Waiting for Cluster to be set on Machine")
 		return ctrl.Result{}, nil
+	}
+	cluster := &clusterv1.Cluster{}
+	if err := r.Get(ctx, types.NamespacedName{Namespace: machine.Namespace, Name: clusterName}, cluster); err != nil {
+		return ctrl.Result{}, errors.Wrap(err, "unable to get Cluster")
 	}
 
 	// Get the WaldurCluster from the Cluster's infrastructureRef

@@ -37,8 +37,6 @@ import (
 
 	waldurclient "github.com/waldur/go-client"
 
-	util "sigs.k8s.io/cluster-api/util"
-
 	openapitypes "github.com/oapi-codegen/runtime/types"
 )
 
@@ -488,16 +486,17 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
-	cluster, err := util.GetOwnerCluster(ctx, r.Client, waldurCluster.ObjectMeta)
-
-	if err != nil {
-		return ctrl.Result{}, err
+	// Wait for the CAPI core Cluster controller to set the ownerReference on WaldurCluster.
+	// Avoid util.GetOwnerCluster which fetches cluster.x-k8s.io/v1beta2 — not served by all
+	// API servers. The return value was unused beyond the nil check anyway.
+	ownerSet := false
+	for _, ref := range waldurCluster.OwnerReferences {
+		if ref.Kind == "Cluster" {
+			ownerSet = true
+			break
+		}
 	}
-
-	// cluster is nil when the CAPI core Cluster controller hasn't set the ownerReference yet.
-	// This is a normal race at creation time — we return without requeuing because the
-	// ownerReference being set will trigger a new watch event and re-enqueue this reconciler.
-	if cluster == nil {
+	if !ownerSet {
 		log.Info("Waiting for Cluster Controller to set OwnerRef on WaldurCluster")
 		return ctrl.Result{}, nil
 	}

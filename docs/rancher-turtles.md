@@ -27,9 +27,12 @@ Turtles installs the provider Deployment in the **same namespace as the `CAPIPro
 
 ## Compatibility matrix
 
-| Provider | Provider API | CAPI core | CAPI Cluster API | Rancher Turtles |
-|---|---|---|---|---|
-| v0.1.x | `infrastructure.cluster.waldur.com/v1beta2` | v1.10.x | `cluster.x-k8s.io/v1beta1` | v0.25.x |
+| Provider | Provider API | CAPI core | CAPI Cluster API served | Rancher Turtles | Rancher |
+|---|---|---|---|---|---|
+| v0.1.x | `infrastructure.cluster.waldur.com/v1beta2` | v1.10.x | `cluster.x-k8s.io/v1beta1` | v0.25.x | v2.13.x |
+| v0.1.x | `infrastructure.cluster.waldur.com/v1beta2` | v1.12.x | `cluster.x-k8s.io/v1beta1` | v0.26.x | v2.14.x |
+
+The provider registers both `cluster.x-k8s.io/v1beta1` and `cluster.x-k8s.io/v1beta2` in its scheme and reads CAPI objects (Cluster, Machine) exclusively via `v1beta1` — which is universally served across all CAPI core versions. This makes the provider forward-compatible without requiring runtime API discovery.
 
 ### Known compatibility constraints and workarounds
 
@@ -37,9 +40,11 @@ Turtles installs the provider Deployment in the **same namespace as the `CAPIPro
 
 Turtles ≤ v0.25.x refuses to install providers that declare `contract: v1beta2` in `metadata.yaml`, even when the underlying CAPI core fully supports it. Workaround: declare `contract: v1beta1` in `metadata.yaml`. This is safe — Turtles reads `metadata.yaml` only at install time; CAPI core reads the actual contract version from the CRD labels at runtime.
 
-**2. CAPI core v1.10.x serves only `cluster.x-k8s.io/v1beta1` Cluster objects**
+**2. CAPI core serves only `cluster.x-k8s.io/v1beta1` Cluster objects**
 
-The `Cluster` Kubernetes API resource is served at `cluster.x-k8s.io/v1beta1` regardless of CAPI core version. When reconciling a `v1beta1` Cluster, the CAPI core controller looks for the label `cluster.x-k8s.io/v1beta1` on the infrastructure provider CRD to resolve the correct API version. The provider CRD must declare **both** labels:
+Both Turtles v0.25.x (CAPI v1.10.x) and v0.26.x (CAPI v1.12.x) serve the `Cluster` and `Machine` resources only at `cluster.x-k8s.io/v1beta1`. The `v1beta2` API group is defined in the CAPI Go module but is not yet exposed by the API server.
+
+When reconciling a `v1beta1` Cluster, the CAPI core controller looks for the label `cluster.x-k8s.io/v1beta1` on the infrastructure provider CRD to resolve the correct API version. The provider CRD must declare **both** labels:
 
 ```yaml
 labels:
@@ -52,7 +57,14 @@ Without the `v1beta1` label the CAPI cluster controller errors with:
 
 Both labels are already set in the provider CRDs via the `+kubebuilder:metadata:labels` markers. No manual action needed.
 
-**3. CAPI core manager lacks RBAC access to provider resources**
+**3. `sigs.k8s.io/cluster-api/util` helpers use v1beta2 types internally**
+
+The CAPI Go module's `util.GetOwnerCluster`, `util.GetOwnerMachine`, and `util.GetClusterFromMetadata` helpers always fetch objects via `cluster.x-k8s.io/v1beta2`, which is not served by the API server (see constraint 2). Using these helpers directly causes:
+> `no matches for kind "Cluster" in version "cluster.x-k8s.io/v1beta2"`
+
+Workaround: the provider replaces these calls with inline ownerReference inspection and direct `client.Get` calls using `v1beta1` types — no util package dependency in the reconcile path.
+
+**4. CAPI core manager lacks RBAC access to provider resources**
 
 The CAPI core controller (`capi-manager` service account) needs cluster-wide list/watch access to `WaldurCluster` and `WaldurMachine` to set OwnerRefs. CAPI uses an aggregated ClusterRole (`capi-aggregated-manager-role`) that picks up rules from any ClusterRole labelled `cluster.x-k8s.io/aggregate-to-manager: "true"`.
 
@@ -159,7 +171,7 @@ releaseSeries:
     contract: v1beta1
 ```
 
-> **Note:** The provider declares both `cluster.x-k8s.io/v1beta1: v1beta2` and `cluster.x-k8s.io/v1beta2: v1beta2` labels on its CRDs. The v1beta1 label is required for CAPI core installations that only serve `cluster.x-k8s.io/v1beta1` (older Turtles/CAPI operator bundles); without it the CAPI cluster controller cannot match the infrastructure CRD and refuses to set the OwnerRef. The `contract: v1beta1` in `metadata.yaml` is a separate Turtles pre-flight workaround. Both can be removed once Turtles ships with CAPI core ≥ v1.9.0 (which serves `cluster.x-k8s.io/v1beta2`).
+> **Note:** The provider declares both `cluster.x-k8s.io/v1beta1: v1beta2` and `cluster.x-k8s.io/v1beta2: v1beta2` labels on its CRDs. The v1beta1 label is required for CAPI core to match the infrastructure CRD when reconciling v1beta1 Cluster objects; without it the CAPI cluster controller cannot set the OwnerRef. The `contract: v1beta1` in `metadata.yaml` is a separate Turtles pre-flight workaround. Both labels are needed regardless of CAPI core version — even Turtles v0.26.x (CAPI v1.12.x) serves only `cluster.x-k8s.io/v1beta1` at runtime.
 
 ### Creating a release
 
