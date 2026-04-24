@@ -1,0 +1,113 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  labels:
+    cluster.x-k8s.io/v1beta1: v1beta2
+    cluster.x-k8s.io/v1beta2: v1beta2
+  name: waldurmachinetemplates.infrastructure.cluster.waldur.com
+spec:
+  group: infrastructure.cluster.waldur.com
+  names:
+    kind: WaldurMachineTemplate
+    listKind: WaldurMachineTemplateList
+    plural: waldurmachinetemplates
+    singular: waldurmachinetemplate
+  scope: Namespaced
+  versions:
+  - name: v1beta2
+    schema:
+      openAPIV3Schema:
+        description: WaldurMachineTemplate is the Schema for the waldurmachinetemplates
+          API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: WaldurMachineTemplateSpec defines the desired state of WaldurMachineTemplate.
+            properties:
+              template:
+                description: |-
+                  WaldurMachineTemplateResource holds the spec that is cloned into each WaldurMachine
+                  when a MachineDeployment or MachineSet creates a new Machine.
+                properties:
+                  metadata:
+                    type: object
+                  spec:
+                    description: WaldurMachineSpec defines the desired state of WaldurMachine.
+                    properties:
+                      dataDiskSize:
+                        description: DataDiskSize is the size in GB of the data disk.
+                          Applicable to worker nodes.
+                        minimum: 10
+                        type: integer
+                      flavor:
+                        description: Flavor is the OpenStack flavor name for this
+                          machine.
+                        type: string
+                      image:
+                        description: Image is the name or UUID of the OS image to
+                          use for this VM.
+                        type: string
+                      nodeType:
+                        description: NodeType classifies this machine as a worker
+                          or storage node.
+                        enum:
+                        - worker
+                        - storage
+                        type: string
+                      offeringSlug:
+                        description: |-
+                          OfferingSlug identifies which datacenter offering (OpenStack deployment) this
+                          machine should be provisioned in. Must match one of the offering slugs in the
+                          parent WaldurCluster's spec.datacenters.
+                        type: string
+                      providerID:
+                        description: |-
+                          ProviderID is the identifier of the VM in the cloud provider, set after provisioning.
+                          Follows the format "waldur://<vm-uuid>". Required by the CAPI Machine controller.
+                        type: string
+                      systemDiskSize:
+                        description: SystemDiskSize is the size in GB of the system
+                          (root) disk.
+                        minimum: 10
+                        type: integer
+                      vsanDiskSize:
+                        description: VsanDiskSize is the size in GB of the vSAN disk.
+                          Required for storage nodes.
+                        minimum: 100
+                        type: integer
+                    required:
+                    - flavor
+                    - image
+                    - nodeType
+                    - offeringSlug
+                    type: object
+                required:
+                - spec
+                type: object
+            required:
+            - template
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true

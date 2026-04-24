@@ -4,6 +4,7 @@
 resources:
 - bases/infrastructure.cluster.waldur.com_waldurclusters.yaml
 - bases/infrastructure.cluster.waldur.com_waldurmachines.yaml
+- bases/infrastructure.cluster.waldur.com_waldurmachinetemplates.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:
