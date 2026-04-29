@@ -484,6 +484,36 @@ func (r *WaldurMachineReconciler) reconcileDelete(ctx context.Context, waldurMac
 		return ctrl.Result{}, nil
 	}
 
+	// Stop the VM before termination if it is still running.
+	if waldurMachine.Status.VmUuid != nil {
+		vmUUID, err := uuid.Parse(*waldurMachine.Status.VmUuid)
+		if err != nil {
+			return ctrl.Result{}, errors.Wrap(err, "invalid VM UUID")
+		}
+		instanceResp, err := r.Waldur.OpenstackInstancesRetrieveWithResponse(ctx, vmUUID, &waldurclient.OpenstackInstancesRetrieveParams{
+			Field: &[]waldurclient.OpenStackInstanceFieldEnum{
+				waldurclient.OpenStackInstanceFieldEnumRuntimeState,
+			},
+		})
+		if err != nil {
+			return ctrl.Result{}, errors.Wrap(err, "unable to retrieve VM runtime state")
+		}
+		if instanceResp.JSON200 != nil && instanceResp.JSON200.RuntimeState != nil {
+			runtimeState := *instanceResp.JSON200.RuntimeState
+			if runtimeState != "SHUTOFF" && runtimeState != "ERROR" {
+				log.Info("Stopping VM before termination", "machine", waldurMachine.Name, "runtimeState", runtimeState)
+				stopResp, err := r.Waldur.OpenstackInstancesStopWithResponse(ctx, vmUUID)
+				if err != nil {
+					return ctrl.Result{}, errors.Wrap(err, "unable to stop VM")
+				}
+				if stopResp.StatusCode() >= 400 {
+					log.Info("Stop request returned non-OK status, will retry", "machine", waldurMachine.Name, "status", stopResp.StatusCode())
+				}
+				return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+			}
+		}
+	}
+
 	// Submit termination order
 	log.Info("Submitting VM termination order", "machine", waldurMachine.Name)
 	order, err := submitTerminationOrder(ctx, r.Waldur, waldurMachine.Status.MarketplaceResourceUuid)
