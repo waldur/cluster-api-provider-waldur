@@ -445,6 +445,7 @@ func (r *WaldurClusterReconciler) reconcileDelete(ctx context.Context, waldurClu
 // +kubebuilder:rbac:groups=infrastructure.cluster.waldur.com,resources=waldurmachines,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=infrastructure.cluster.waldur.com,resources=waldurmachines/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=infrastructure.cluster.waldur.com,resources=waldurmachines/finalizers,verbs=update
+// +kubebuilder:rbac:groups=infrastructure.cluster.waldur.com,resources=waldurmachinetemplates,verbs=get;list;watch;patch;update
 // +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines;machines/status,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch

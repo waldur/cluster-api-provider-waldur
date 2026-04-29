@@ -53,3 +53,13 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - infrastructure.cluster.waldur.com
+  resources:
+  - waldurmachinetemplates
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch

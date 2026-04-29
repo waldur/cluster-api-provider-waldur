@@ -157,14 +157,15 @@ SECRET_ID=$(cat /etc/vault/secret-id)
 
 VAULT_TOKEN=$(curl -sf "${VAULT_ADDR}/v1/auth/approle/login" \
   --data "{\"role_id\":\"${ROLE_ID}\",\"secret_id\":\"${SECRET_ID}\"}" \
-  | jq -r '.auth.client_token')
+  | grep -o '"client_token":"[^"]*"' | sed 's/"client_token":"//;s/"//')
 [ -z "${VAULT_TOKEN}" ] && { echo "[ERROR] Vault login failed"; exit 1; }
 
 RKE2_TOKEN=$(curl -sf "${VAULT_ADDR}/v1/${VAULT_SECRET_PATH}" \
   -H "X-Vault-Token: ${VAULT_TOKEN}" \
-  | jq -r '.data.data.token')
+  | grep -o '"token":"[^"]*"' | head -1 | sed 's/"token":"//;s/"//')
 [ -z "${RKE2_TOKEN}" ] && { echo "[ERROR] Failed to fetch RKE2 token"; exit 1; }
 
+mkdir -p /etc/rancher/rke2
 echo "token: ${RKE2_TOKEN}" >> /etc/rancher/rke2/config.yaml
 echo "[INFO] RKE2 join token injected into config."
 
