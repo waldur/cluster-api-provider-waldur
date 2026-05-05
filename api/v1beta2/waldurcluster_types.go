@@ -20,6 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	waldurclient "github.com/waldur/go-client"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 )
 
 // ClusterTopology defines the datacenter distribution strategy.
@@ -34,7 +35,7 @@ const (
 )
 
 // NodeType classifies a node group by its workload role.
-// +kubebuilder:validation:Enum=worker;storage
+// +kubebuilder:validation:Enum=worker;storage;controlplane
 type NodeType string
 
 const (
@@ -42,6 +43,8 @@ const (
 	WorkerNode NodeType = "worker"
 	// StorageNode provides persistent volume capabilities via Longhorn vSAN.
 	StorageNode NodeType = "storage"
+	// ControlPlaneNode runs the Kubernetes control plane (etcd, kube-apiserver, etc.).
+	ControlPlaneNode NodeType = "controlplane"
 )
 
 // WaldurClusterSpec defines the desired state of WaldurCluster.
@@ -63,6 +66,12 @@ type WaldurClusterSpec struct {
 	// SecurityRules defines CIDR-based network ingress/egress policies applied to all tenants.
 	// +optional
 	SecurityRules []SecurityRule `json:"securityRules,omitempty"`
+
+	// ControlPlaneEndpoint is the API server address of the provisioned cluster.
+	// Set by the WaldurCluster controller once the first control plane VM is running,
+	// to the VM's internal IP on port 6443. Required by CAPI to advance the cluster phase.
+	// +optional
+	ControlPlaneEndpoint clusterv1.APIEndpoint `json:"controlPlaneEndpoint,omitempty"`
 }
 
 // DatacenterSpec defines the configuration for a single datacenter (Waldur offering).

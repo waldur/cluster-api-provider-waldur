@@ -174,40 +174,62 @@ func (r *WaldurMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 func (r *WaldurMachineReconciler) createVM(ctx context.Context, machine *clusterv1.Machine, waldurMachine *infrastructurev1beta2.WaldurMachine, waldurCluster *infrastructurev1beta2.WaldurCluster) error {
 	log := logf.FromContext(ctx)
 
-	// --- Bootstrap gate ---
-	// Gate on the bootstrap Secret being ready (standard CAPI infra provider contract).
-	// The CAPI Machine controller sets DataSecretName once the bootstrap provider completes.
-	if machine.Spec.Bootstrap.DataSecretName == nil {
-		log.Info("Waiting for bootstrap secret", "machine", waldurMachine.Name)
-		return errBootstrapNotReady
-	}
-
-	// Read the bootstrap Secret produced by the RKE2 bootstrap provider.
-	// secret.Data["value"] is the full cloud-init YAML including the RKE2 join token.
-	bootstrapSecret := &corev1.Secret{}
-	if err := r.Get(ctx, types.NamespacedName{
-		Namespace: machine.Namespace,
-		Name:      *machine.Spec.Bootstrap.DataSecretName,
-	}, bootstrapSecret); err != nil {
-		return errors.Wrap(err, "failed to fetch bootstrap secret")
-	}
-	rawCloudInit := bootstrapSecret.Data["value"]
-
-	// --- Vault integration (optional) ---
 	var userData *string
 	var vaultSecretID, vaultRoleName string
+
 	if r.VaultClient != nil {
-		ud, sid, roleName, err := r.buildUserDataWithVault(ctx, machine, rawCloudInit)
+		vaultConfigSecret, err := r.readVaultConfigSecret(ctx, machine.Spec.ClusterName)
 		if err != nil {
 			return err
 		}
-		userData = &ud
-		vaultSecretID = sid
-		vaultRoleName = roleName
+
+		if hasRancherFields(vaultConfigSecret) {
+			// Rancher-system-agent path — no bootstrap gate needed.
+			// Crossplane already wrote the registration token to Vault.
+			log.Info("Using rancher-system-agent cloud-init path", "machine", waldurMachine.Name)
+			ud, sid, roleName, err := r.buildUserDataWithRancherAgent(ctx, machine, waldurMachine, vaultConfigSecret)
+			if err != nil {
+				return err
+			}
+			userData = &ud
+			vaultSecretID = sid
+			vaultRoleName = roleName
+		} else {
+			// RKE2 bootstrap path — gate on bootstrap Secret from RKE2 bootstrap provider.
+			if machine.Spec.Bootstrap.DataSecretName == nil {
+				log.Info("Waiting for bootstrap secret", "machine", waldurMachine.Name)
+				return errBootstrapNotReady
+			}
+			bootstrapSecret := &corev1.Secret{}
+			if err := r.Get(ctx, types.NamespacedName{
+				Namespace: machine.Namespace,
+				Name:      *machine.Spec.Bootstrap.DataSecretName,
+			}, bootstrapSecret); err != nil {
+				return errors.Wrap(err, "failed to fetch bootstrap secret")
+			}
+			ud, sid, roleName, err := r.buildUserDataWithVault(ctx, machine, bootstrapSecret.Data["value"], vaultConfigSecret)
+			if err != nil {
+				return err
+			}
+			userData = &ud
+			vaultSecretID = sid
+			vaultRoleName = roleName
+		}
 	} else {
-		// No Vault: pass bootstrap cloud-init verbatim as user_data.
-		// Note: the RKE2 join token will be visible in Waldur's user_data store.
-		ud := string(rawCloudInit)
+		// No Vault: gate on bootstrap Secret and pass verbatim.
+		// The RKE2 join token will be visible in Waldur's user_data store.
+		if machine.Spec.Bootstrap.DataSecretName == nil {
+			log.Info("Waiting for bootstrap secret", "machine", waldurMachine.Name)
+			return errBootstrapNotReady
+		}
+		bootstrapSecret := &corev1.Secret{}
+		if err := r.Get(ctx, types.NamespacedName{
+			Namespace: machine.Namespace,
+			Name:      *machine.Spec.Bootstrap.DataSecretName,
+		}, bootstrapSecret); err != nil {
+			return errors.Wrap(err, "failed to fetch bootstrap secret")
+		}
+		ud := string(bootstrapSecret.Data["value"])
 		userData = &ud
 	}
 
@@ -530,6 +552,68 @@ func (r *WaldurMachineReconciler) reconcileDelete(ctx context.Context, waldurMac
 	return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 }
 
+// readVaultConfigSecret fetches the vault-config-<clusterName> Secret from the operator namespace.
+func (r *WaldurMachineReconciler) readVaultConfigSecret(ctx context.Context, clusterName string) (*corev1.Secret, error) {
+	secret := &corev1.Secret{}
+	secretName := fmt.Sprintf("vault-config-%s", clusterName)
+	if err := r.Get(ctx, types.NamespacedName{
+		Namespace: r.OperatorNamespace,
+		Name:      secretName,
+	}, secret); err != nil {
+		return nil, errors.Wrapf(err, "failed to fetch vault config secret %q", secretName)
+	}
+	return secret, nil
+}
+
+// hasRancherFields reports whether the vault-config Secret contains the Rancher-path fields,
+// indicating the rancher-system-agent provisioning path should be used.
+func hasRancherFields(secret *corev1.Secret) bool {
+	_, hasURL := secret.Data["rancher_url"]
+	return hasURL
+}
+
+// buildUserDataWithRancherAgent generates cloud-init for a VM that uses rancher-system-agent
+// to join the cluster. Crossplane already wrote the Rancher registration token to Vault —
+// the controller only generates a per-VM AppRole secret_id and embeds the path in cloud-init.
+//
+// Returns (userData, secretID, roleName, err).
+func (r *WaldurMachineReconciler) buildUserDataWithRancherAgent(ctx context.Context, machine *clusterv1.Machine, waldurMachine *infrastructurev1beta2.WaldurMachine, vaultConfigSecret *corev1.Secret) (userData, secretID, roleName string, err error) {
+	log := logf.FromContext(ctx)
+
+	vaultAddr := string(vaultConfigSecret.Data["vault_addr"])
+	roleName = string(vaultConfigSecret.Data["role_name"])
+	roleID := string(vaultConfigSecret.Data["role_id"])
+	rancherURL := string(vaultConfigSecret.Data["rancher_url"])
+	secretPath := string(vaultConfigSecret.Data["rancher_vault_secret_path"])
+	if secretPath == "" {
+		secretPath = fmt.Sprintf("secret/data/haldus.k8s.riigipilv.ee/rancher/%s", machine.Spec.ClusterName)
+	}
+
+	log.Info("Generating rancher-system-agent cloud-init", "machine", waldurMachine.Name, "roleName", roleName, "vaultPath", secretPath)
+
+	secretID, err = r.VaultClient.GenerateSecretID(ctx, roleName)
+	if err != nil {
+		return "", "", "", errors.Wrap(err, "failed to generate Vault secret_id")
+	}
+
+	userData, err = BuildRancherAgentUserData(RancherAgentInput{
+		StaticCloudInit: r.BaseTemplate,
+		VaultParams: RancherVaultParams{
+			Addr:       vaultAddr,
+			SecretPath: secretPath,
+			RoleID:     roleID,
+			SecretID:   secretID,
+		},
+		RancherURL: rancherURL,
+	})
+	if err != nil {
+		_ = r.VaultClient.RevokeSecretID(ctx, roleName, secretID)
+		return "", "", "", errors.Wrap(err, "failed to build rancher-agent cloud-init")
+	}
+
+	return userData, secretID, roleName, nil
+}
+
 // buildUserDataWithVault strips the RKE2 join token from the bootstrap cloud-init,
 // stores it in Vault (idempotent — first node writes, rest skip), generates a
 // single-use AppRole secret_id for this node, and returns the merged cloud-init
@@ -538,22 +622,12 @@ func (r *WaldurMachineReconciler) reconcileDelete(ctx context.Context, waldurMac
 // Returns (userData, secretID, roleName, err). The caller must call
 // VaultClient.RevokeSecretID(roleName, secretID) if the VM creation order fails,
 // to avoid leaving dangling credentials in Vault.
-func (r *WaldurMachineReconciler) buildUserDataWithVault(ctx context.Context, machine *clusterv1.Machine, rawCloudInit []byte) (userData, secretID, roleName string, err error) {
+func (r *WaldurMachineReconciler) buildUserDataWithVault(ctx context.Context, machine *clusterv1.Machine, rawCloudInit []byte, vaultConfigSecret *corev1.Secret) (userData, secretID, roleName string, err error) {
 	log := logf.FromContext(ctx)
 
 	sanitisedCI, rke2Token, err := stripRKE2Token(rawCloudInit)
 	if err != nil {
 		return "", "", "", errors.Wrap(err, "failed to strip RKE2 token from bootstrap cloud-init")
-	}
-
-	// Read the vault-config-<clusterName> Secret written by Crossplane at cluster creation.
-	vaultConfigSecret := &corev1.Secret{}
-	secretName := fmt.Sprintf("vault-config-%s", machine.Spec.ClusterName)
-	if err := r.Get(ctx, types.NamespacedName{
-		Namespace: r.OperatorNamespace,
-		Name:      secretName,
-	}, vaultConfigSecret); err != nil {
-		return "", "", "", errors.Wrapf(err, "failed to fetch vault config secret %q", secretName)
 	}
 
 	vaultAddr := string(vaultConfigSecret.Data["vault_addr"])
@@ -562,7 +636,6 @@ func (r *WaldurMachineReconciler) buildUserDataWithVault(ctx context.Context, ma
 	roleID := string(vaultConfigSecret.Data["role_id"])
 
 	// Idempotent: the first node writes the token; subsequent nodes skip the write.
-	// secretPath is the full KV v2 path (e.g. "secret/data/rke2/<clusterName>/join-token").
 	exists, err := r.VaultClient.SecretExists(ctx, secretPath)
 	if err != nil {
 		return "", "", "", errors.Wrap(err, "failed to check if RKE2 token exists in Vault")
@@ -576,7 +649,6 @@ func (r *WaldurMachineReconciler) buildUserDataWithVault(ctx context.Context, ma
 		log.Info("RKE2 token already in Vault, skipping write", "path", secretPath)
 	}
 
-	// Generate a single-use secret_id for this node's boot-time Vault login.
 	secretID, err = r.VaultClient.GenerateSecretID(ctx, roleName)
 	if err != nil {
 		return "", "", "", errors.Wrap(err, "failed to generate Vault secret_id")
@@ -593,7 +665,6 @@ func (r *WaldurMachineReconciler) buildUserDataWithVault(ctx context.Context, ma
 		},
 	})
 	if err != nil {
-		// Revoke unused secret_id — don't leave it dangling in Vault until TTL expiry.
 		_ = r.VaultClient.RevokeSecretID(ctx, roleName, secretID)
 		return "", "", "", errors.Wrap(err, "failed to merge cloud-init")
 	}

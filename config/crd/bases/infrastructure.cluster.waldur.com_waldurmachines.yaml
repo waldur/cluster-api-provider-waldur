@@ -60,6 +60,7 @@ spec:
                 enum:
                 - worker
                 - storage
+                - controlplane
                 type: string
               offeringSlug:
                 description: |-

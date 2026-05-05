@@ -42,6 +42,21 @@ spec:
           spec:
             description: spec defines the desired state of WaldurCluster
             properties:
+              controlPlaneEndpoint:
+                description: |-
+                  ControlPlaneEndpoint is the API server address of the provisioned cluster.
+                  Set by the WaldurCluster controller once the first control plane VM is running,
+                  to the VM's internal IP on port 6443. Required by CAPI to advance the cluster phase.
+                properties:
+                  host:
+                    description: host is the hostname on which the API server is serving.
+                    maxLength: 512
+                    type: string
+                  port:
+                    description: port is the port on which the API server is serving.
+                    format: int32
+                    type: integer
+                type: object
               datacenters:
                 description: |-
                   Datacenters defines per-datacenter configuration. Each entry maps to one
@@ -82,6 +97,7 @@ spec:
                             enum:
                             - worker
                             - storage
+                            - controlplane
                             type: string
                           vsanDiskSize:
                             description: |-

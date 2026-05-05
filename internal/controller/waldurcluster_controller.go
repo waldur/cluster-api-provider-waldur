@@ -22,10 +22,13 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/pkg/errors"
 	infrastructurev1beta2 "github.com/waldur/cluster-api-provider-waldur/api/v1beta2"
@@ -38,6 +41,7 @@ import (
 	waldurclient "github.com/waldur/go-client"
 
 	openapitypes "github.com/oapi-codegen/runtime/types"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 )
 
 const finalizer = "waldurcluster.infrastructure.cluster.waldur.com/finalizer"
@@ -533,6 +537,10 @@ func (r *WaldurClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, errors.Wrapf(err, "couldn't patch status for cluster %q", waldurCluster.Name)
 	}
 
+	if err := r.reconcileControlPlaneEndpoint(ctx, &waldurCluster); err != nil {
+		log.Error(err, "Unable to reconcile controlPlaneEndpoint", "cluster", waldurCluster.Name)
+	}
+
 	if anyTenantPending(tenants) {
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
@@ -594,10 +602,99 @@ func anyTenantPending(tenants map[string]infrastructurev1beta2.OpenStackTenant) 
 	return false
 }
 
+// waldurMachineToCluster maps a WaldurMachine event to a reconcile request for
+// the owning WaldurCluster, so the cluster controller is notified when a control
+// plane machine reaches OK state and a controlPlaneEndpoint can be set.
+func (r *WaldurClusterReconciler) waldurMachineToCluster(ctx context.Context, obj client.Object) []reconcile.Request {
+	wm, ok := obj.(*infrastructurev1beta2.WaldurMachine)
+	if !ok {
+		return nil
+	}
+	clusterName := wm.Labels[clusterv1.ClusterNameLabel]
+	if clusterName == "" {
+		return nil
+	}
+	return []reconcile.Request{{NamespacedName: types.NamespacedName{
+		Name:      clusterName,
+		Namespace: wm.Namespace,
+	}}}
+}
+
+// reconcileControlPlaneEndpoint sets WaldurCluster.Spec.ControlPlaneEndpoint once
+// the first control plane WaldurMachine reaches OK state. Idempotent — returns
+// immediately if the endpoint is already set.
+func (r *WaldurClusterReconciler) reconcileControlPlaneEndpoint(ctx context.Context, waldurCluster *infrastructurev1beta2.WaldurCluster) error {
+	if waldurCluster.Spec.ControlPlaneEndpoint.Host != "" {
+		return nil
+	}
+
+	machineList := &infrastructurev1beta2.WaldurMachineList{}
+	if err := r.List(ctx, machineList,
+		client.InNamespace(waldurCluster.Namespace),
+		client.MatchingLabels{clusterv1.ClusterNameLabel: waldurCluster.Name},
+	); err != nil {
+		return errors.Wrap(err, "unable to list WaldurMachines")
+	}
+
+	var firstCP *infrastructurev1beta2.WaldurMachine
+	for i := range machineList.Items {
+		m := &machineList.Items[i]
+		if m.Spec.NodeType == infrastructurev1beta2.ControlPlaneNode &&
+			m.Status.State == waldurclient.CoreStatesOK &&
+			m.Status.MarketplaceResourceUuid != "" {
+			firstCP = m
+			break
+		}
+	}
+	if firstCP == nil {
+		return nil // wait for next WaldurMachine reconcile
+	}
+
+	resource, err := getMarketplaceResource(ctx, r.Waldur, firstCP.Status.MarketplaceResourceUuid)
+	if err != nil {
+		return errors.Wrap(err, "unable to get marketplace resource for control plane VM")
+	}
+	if resource.ResourceUuid == nil {
+		return nil
+	}
+
+	instanceResp, err := r.Waldur.OpenstackInstancesRetrieveWithResponse(ctx, *resource.ResourceUuid, &waldurclient.OpenstackInstancesRetrieveParams{
+		Field: &[]waldurclient.OpenStackInstanceFieldEnum{
+			waldurclient.OpenStackInstanceFieldEnumInternalIps,
+		},
+	})
+	if err != nil {
+		return errors.Wrap(err, "unable to retrieve control plane VM")
+	}
+	if instanceResp.JSON200 == nil {
+		return errors.Errorf("unexpected nil instance response (status %d)", instanceResp.StatusCode())
+	}
+	ips := instanceResp.JSON200.InternalIps
+	if ips == nil || len(*ips) == 0 {
+		return nil // IP not yet assigned
+	}
+
+	log := logf.FromContext(ctx)
+	ip := (*ips)[0]
+	log.Info("Setting controlPlaneEndpoint", "cluster", waldurCluster.Name, "ip", ip)
+	waldurCluster.Spec.ControlPlaneEndpoint = clusterv1.APIEndpoint{
+		Host: ip,
+		Port: 6443,
+	}
+	if err := r.Update(ctx, waldurCluster); err != nil {
+		return errors.Wrap(err, "unable to patch controlPlaneEndpoint")
+	}
+	return nil
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *WaldurClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&infrastructurev1beta2.WaldurCluster{}).
+		Watches(
+			&infrastructurev1beta2.WaldurMachine{},
+			handler.EnqueueRequestsFromMapFunc(r.waldurMachineToCluster),
+		).
 		Named("waldurcluster").
 		Complete(r)
 }
