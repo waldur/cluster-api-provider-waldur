@@ -32,17 +32,28 @@ Turtles installs the provider Deployment in the **same namespace as the `CAPIPro
 | v0.1.x | `infrastructure.cluster.waldur.com/v1beta2` | v1.10.x | `cluster.x-k8s.io/v1beta1` | v0.25.x | v2.13.x |
 | v0.1.x | `infrastructure.cluster.waldur.com/v1beta2` | v1.12.x | `cluster.x-k8s.io/v1beta1` | v0.26.x | v2.14.x |
 
-The provider registers both `cluster.x-k8s.io/v1beta1` and `cluster.x-k8s.io/v1beta2` in its scheme and reads CAPI objects (Cluster, Machine) exclusively via `v1beta1` — which is universally served across all CAPI core versions. This makes the provider forward-compatible without requiring runtime API discovery.
+The provider API and contract implementation are **v1beta2 only**:
+`WaldurCluster`, `WaldurMachine`, and `WaldurMachineTemplate` are served only as
+`infrastructure.cluster.waldur.com/v1beta2`. For compatibility with the CAPI core versions
+bundled with Turtles, the controller reads CAPI `Cluster` and `Machine` objects using
+`cluster.x-k8s.io/v1beta1`.
 
 ### Known compatibility constraints and workarounds
 
 **1. Turtles pre-flight rejects `contract: v1beta2`**
 
-Turtles ≤ v0.25.x refuses to install providers that declare `contract: v1beta2` in `metadata.yaml`, even when the underlying CAPI core fully supports it. Workaround: declare `contract: v1beta1` in `metadata.yaml`. This is safe — Turtles reads `metadata.yaml` only at install time; CAPI core reads the actual contract version from the CRD labels at runtime.
+Turtles ≤ v0.25.x refuses to install providers that declare `contract: v1beta2` in
+`metadata.yaml`. The current packaging workaround declares `contract: v1beta1` in
+`metadata.yaml` so Turtles can install the provider.
 
-**2. CAPI core serves only `cluster.x-k8s.io/v1beta1` Cluster objects**
+This metadata value does **not** mean the Waldur provider implements or serves the v1beta1
+infrastructure provider contract. The provider remains v1beta2-only. Turtles reports
+`CAPIProvider.status.contract: v1beta1` because it copies the compatibility value from
+`metadata.yaml`.
 
-Both Turtles v0.25.x (CAPI v1.10.x) and v0.26.x (CAPI v1.12.x) serve the `Cluster` and `Machine` resources only at `cluster.x-k8s.io/v1beta1`. The `v1beta2` API group is defined in the CAPI Go module but is not yet exposed by the API server.
+**2. Provider reads Cluster/Machine via `cluster.x-k8s.io/v1beta1` for cross-version compatibility**
+
+CAPI core's `v1beta2` Cluster/Machine API group is not guaranteed to be served by every CAPI core version this provider supports — for example, newer lines like v1.12.x (bundled with Turtles v0.26.x) do serve `v1beta2` (it's even the storage version there), but older lines like v1.10.x (bundled with Turtles v0.25.x) predate it. Rather than branch on the CAPI core version at runtime, the provider reads `Cluster` and `Machine` objects exclusively via `cluster.x-k8s.io/v1beta1`, which is served across all supported CAPI core versions, keeping a single code path compatible with both.
 
 When reconciling a `v1beta1` Cluster, the CAPI core controller looks for the label `cluster.x-k8s.io/v1beta1` on the infrastructure provider CRD to resolve the correct API version. The provider CRD must declare **both** labels:
 
@@ -193,6 +204,10 @@ The `.github/workflows/release.yml` workflow will:
 
 Create all resources **before** applying the `CAPIProvider` CR so the pod starts cleanly. Replace `<namespace>` with the namespace where the `CAPIProvider` CR will be created (e.g. `cattle-turtles-system`).
 
+The `waldur-api-secret` is mandatory. Although its Deployment references are marked optional
+so Kubernetes can create the pod, the controller exits immediately when `WALDUR_API_URL` or
+`WALDUR_API_TOKEN` is missing.
+
 ### Step 1 — Create the API credentials Secret
 
 ```bash
@@ -260,24 +275,8 @@ kubectl rollout restart deployment/cluster-api-provider-waldur-controller-manage
 
 ### Step 4 — Install the provider via Turtles
 
-Turtles doesn't support specifying a custom provider URL directly in the `CAPIProvider` CR. Register the provider URL first via a `ClusterctlConfig` resource in the `cattle-turtles-system` namespace:
-
-```bash
-kubectl apply -f - <<EOF
-apiVersion: turtles-capi.cattle.io/v1alpha1
-kind: ClusterctlConfig
-metadata:
-  name: clusterctl-config
-  namespace: cattle-turtles-system
-spec:
-  providers:
-    - name: waldur
-      url: "https://github.com/waldur/cluster-api-provider-waldur/releases/download/v0.1.0/install.yaml"
-      type: InfrastructureProvider
-EOF
-```
-
-Then apply the `CAPIProvider` CR:
+Apply a `CAPIProvider` CR with `spec.fetchConfig.url` pointing to the provider manifest in the
+latest GitHub release. `spec.version` selects the exact release to install:
 
 ```bash
 kubectl apply -f - <<EOF
@@ -289,11 +288,22 @@ metadata:
 spec:
   name: waldur
   type: infrastructure
-  version: v0.1.0
+  version: v0.1.9
+  fetchConfig:
+    url: "https://github.com/waldur/cluster-api-provider-waldur/releases/latest/install.yaml"
 EOF
 ```
 
-Turtles reconciles this and installs the provider. The controller pod reads the Secret and ConfigMap at startup.
+Turtles uses the URL to identify the GitHub repository and the provider manifest asset name,
+then fetches the release selected by `CAPIProvider.spec.version`. To upgrade, update only
+`CAPIProvider.spec.version`.
+
+Do not put this URL in `ClusterctlConfig`. Turtles v0.25.x parses `latest` from a
+`ClusterctlConfig` provider URL as the provider version and rejects it with
+`IncorrectVersionFormat`. The same URL is valid specifically under
+`CAPIProvider.spec.fetchConfig.url`.
+
+The controller pod reads the Secret and ConfigMap at startup.
 
 ### Step 5 — Image pull secrets (private registry only)
 
