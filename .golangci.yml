@@ -45,6 +45,9 @@ linters:
           - dupl
           - lll
         path: internal/*
+      - linters:
+          - staticcheck
+        text: 'SA1019: "sigs\.k8s\.io/cluster-api/api/core/v1beta1" is deprecated'
     paths:
       - third_party$
       - builtin$

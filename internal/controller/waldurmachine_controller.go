@@ -207,7 +207,7 @@ func (r *WaldurMachineReconciler) createVM(ctx context.Context, machine *cluster
 			}, bootstrapSecret); err != nil {
 				return errors.Wrap(err, "failed to fetch bootstrap secret")
 			}
-			ud, sid, roleName, err := r.buildUserDataWithVault(ctx, machine, bootstrapSecret.Data["value"], vaultConfigSecret)
+			ud, sid, roleName, err := r.buildUserDataWithVault(ctx, bootstrapSecret.Data["value"], vaultConfigSecret)
 			if err != nil {
 				return err
 			}
@@ -622,7 +622,7 @@ func (r *WaldurMachineReconciler) buildUserDataWithRancherAgent(ctx context.Cont
 // Returns (userData, secretID, roleName, err). The caller must call
 // VaultClient.RevokeSecretID(roleName, secretID) if the VM creation order fails,
 // to avoid leaving dangling credentials in Vault.
-func (r *WaldurMachineReconciler) buildUserDataWithVault(ctx context.Context, machine *clusterv1.Machine, rawCloudInit []byte, vaultConfigSecret *corev1.Secret) (userData, secretID, roleName string, err error) {
+func (r *WaldurMachineReconciler) buildUserDataWithVault(ctx context.Context, rawCloudInit []byte, vaultConfigSecret *corev1.Secret) (userData, secretID, roleName string, err error) {
 	log := logf.FromContext(ctx)
 
 	sanitisedCI, rke2Token, err := stripRKE2Token(rawCloudInit)

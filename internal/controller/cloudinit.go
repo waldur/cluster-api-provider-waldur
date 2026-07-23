@@ -160,7 +160,7 @@ RANCHER_TOKEN=$(curl -sf "${VAULT_ADDR}/v1/${VAULT_SECRET_PATH}" \
 [ -z "${RANCHER_TOKEN}" ] && { echo "[ERROR] Failed to fetch Rancher token from Vault"; exit 1; }
 
 mkdir -p /etc/rancher-agent
-printf 'token: %s\nurl: %s\n' "${RANCHER_TOKEN}" "${RANCHER_URL}" > /etc/rancher-agent/config.yaml
+printf 'token: %%s\nurl: %%s\n' "${RANCHER_TOKEN}" "${RANCHER_URL}" > /etc/rancher-agent/config.yaml
 echo "[INFO] Rancher registration token written to /etc/rancher-agent/config.yaml"
 
 rm -f /etc/vault/role-id /etc/vault/secret-id
